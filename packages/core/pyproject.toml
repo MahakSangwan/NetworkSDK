@@ -1,0 +1,24 @@
+[project]
+name = "netsdk-core"
+version = "0.1.0"
+description = "Core building blocks shared by netsdk device packages"
+readme = "README.md"
+authors = [
+    { name = "Mahak", email = "mousamsangwan1@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.11",
+]
+
+[project.optional-dependencies]
+ssh = ["netmiko>=4.5"]
+rest = ["httpx>=0.28"]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# PEP 420 namespace package: src/netsdk/ has no __init__.py.
+module-name = "netsdk.core"

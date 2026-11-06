@@ -1,0 +1,39 @@
+# Workspace root. This is not an installable package: it only ties the
+# packages under packages/ together and holds shared dev tooling config.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18",
+    "pytest>=8.4",
+    "ruff>=0.14",
+]
+
+[tool.ruff]
+line-length = 100
+# Lowest supported Python; keeps 3.13+/3.14-only syntax out of the code.
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "N", "PT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["netsdk"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = ["packages/core/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+# importlib mode: every package has its own tests/ dir, and same-named test
+# modules across packages would collide under the default prepend mode.
+addopts = ["--import-mode=importlib", "-m", "not live"]
+markers = [
+    "live: runs against a real device; run manually with `-m live`",
+]
