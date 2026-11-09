@@ -18,6 +18,7 @@ password, a key, or both; tests use whatever is configured.
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
@@ -70,10 +71,12 @@ def configured_creds() -> Credentials:
     )
 
 
-def device(creds: Credentials, host: str | None = None, timeout: float = 30.0) -> CiscoIOS:
+def device(
+    creds: Credentials, host: str | None = None, timeout: float = 30.0, **kwargs: Any
+) -> CiscoIOS:
     target = host or HOST
     assert target
-    return CiscoIOS(target, creds, port=PORT, timeout=timeout, session_log_dir=LOG_DIR)
+    return CiscoIOS(target, creds, port=PORT, timeout=timeout, session_log_dir=LOG_DIR, **kwargs)
 
 
 def assert_log_is_clean(log: Path | None) -> None:
@@ -119,23 +122,25 @@ def test_key_login_show_version() -> None:
 
 @needs_device
 def test_long_output_is_paged_cleanly() -> None:
-    with device(configured_creds(), timeout=120.0) as dev:
+    # A 24-line terminal makes IOS page every ~23 lines, so the pager is
+    # exercised on any device (the default 1000-line terminal rarely pages).
+    with device(configured_creds(), timeout=120.0, terminal_height=24) as dev:
         output = dev.send_command(LONG_COMMAND)
         log = dev.session_log
     assert "--More--" not in output
     assert "\b" not in output
     assert "\r" not in output
     assert log is not None
-    paged = "--More--" in log.read_bytes().decode("utf-8", "replace")
-    print(f"\n{LONG_COMMAND!r}: {len(output.splitlines())} lines, pager hit: {paged}")
+    pages = log.read_bytes().decode("utf-8", "replace").count("--More--")
+    print(f"\n{LONG_COMMAND!r}: {len(output.splitlines())} lines, pager prompts: {pages}")
     print("last 5 lines:\n" + "\n".join(output.splitlines()[-5:]))
+    assert pages > 0, "the device never paged; is the command longer than 24 lines?"
     assert_log_is_clean(log)
 
 
 @needs_device
 def test_show_terminal() -> None:
-    # Tells us what width/length IOS gave the session (netmiko requests a
-    # 511x1000 PTY); this decides how often the pager kicks in.
+    # IOS takes width/length from the PTY we request (511x1000 by default).
     with device(configured_creds()) as dev:
         output = dev.send_command("show terminal")
     print(

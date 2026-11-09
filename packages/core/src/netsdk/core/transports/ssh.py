@@ -46,6 +46,10 @@ from netsdk.core.exceptions import (
 log = logging.getLogger(__name__)
 
 DEFAULT_KNOWN_HOSTS = Path.home() / ".netsdk" / "known_hosts"
+#: PTY size requested when the shell channel opens (netmiko's defaults). IOS
+#: takes its terminal width/length from it, so output pages every 1000 lines.
+DEFAULT_TERMINAL_WIDTH = 511
+DEFAULT_TERMINAL_HEIGHT = 1000
 
 # Serializes known_hosts read-modify-write across threads in this process.
 _known_hosts_lock = threading.Lock()
@@ -53,6 +57,24 @@ _known_hosts_lock = threading.Lock()
 
 class _QuietConnection(BaseConnection):
     """netmiko connection that never writes to the device on its own (D16)."""
+
+    def __init__(
+        self,
+        *args: Any,
+        terminal_width: int = DEFAULT_TERMINAL_WIDTH,
+        terminal_height: int = DEFAULT_TERMINAL_HEIGHT,
+        **kwargs: Any,
+    ) -> None:
+        # Set before super().__init__(), which connects.
+        self._terminal_size = (terminal_width, terminal_height)
+        super().__init__(*args, **kwargs)
+
+    def establish_connection(
+        self, width: int = DEFAULT_TERMINAL_WIDTH, height: int = DEFAULT_TERMINAL_HEIGHT
+    ) -> None:
+        # netmiko's _open() calls this without arguments; use our size instead.
+        width, height = self._terminal_size
+        super().establish_connection(width=width, height=height)
 
     def _try_session_preparation(self, force_data: bool = True) -> None:
         # netmiko would send an Enter here, then `terminal width`,
@@ -189,7 +211,14 @@ class SSHTransport:
         timeout: float = 30.0,
         known_hosts_file: Path | None = DEFAULT_KNOWN_HOSTS,
         strict_host_keys: bool = False,
+        terminal_width: int = DEFAULT_TERMINAL_WIDTH,
+        terminal_height: int = DEFAULT_TERMINAL_HEIGHT,
     ) -> None:
+        # A height of 0 would make IOS-like devices stop paging, i.e. the
+        # equivalent of `terminal length 0`, which AAA denies us. Paging is
+        # handled, not side-stepped (D25).
+        if terminal_width < 1 or terminal_height < 1:
+            raise ValueError("terminal_width and terminal_height must be at least 1")
         self.host = host
         self.credentials = credentials
         self.session_log = session_log
@@ -197,6 +226,8 @@ class SSHTransport:
         self.timeout = timeout
         self.known_hosts_file = known_hosts_file
         self.strict_host_keys = strict_host_keys
+        self.terminal_width = terminal_width
+        self.terminal_height = terminal_height
         self.base_prompt: str | None = None
 
         self._conn: _Connection | None = None
@@ -312,6 +343,8 @@ class SSHTransport:
                 # and the session log should be an exact capture.
                 disable_lf_normalization=True,
                 device_type="netsdk",
+                terminal_width=self.terminal_width,
+                terminal_height=self.terminal_height,
             )
         except NetmikoAuthenticationException as exc:
             raise AuthenticationError(

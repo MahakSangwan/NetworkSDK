@@ -45,6 +45,7 @@ separate Windows machine with device access (git clone, venv, pip; no uv).
 | D22 | SSH host keys: accept and save new, reject changed | Saved to `~/.netsdk/known_hosts` (overridable); `strict_host_keys=True` rejects unknown keys too. No agent, no `~/.ssh` key search: only the credentials given are tried. |
 | D23 | Session logs are byte-exact raw captures | Written in binary with netmiko line-ending normalization off, so a sanitized log can become a fixture. `*.raw` fixtures are `-text` in `.gitattributes`. Default dir `session_logs/` (gitignored). |
 | D24 | Test helpers ship in core (`netsdk.core.testing`) | Fake CLI for transport/getter unit tests; contract tests will live there too. |
+| D25 | Paging is handled, never side-stepped | The SSH PTY size sets the IOS terminal width/length (verified: 511x1000, netmiko's default, which we keep). A height of 0 would disable the pager like `terminal length 0`, so sizes below 1 are rejected. `terminal_height` is configurable; live tests use 24 to force the pager. |
 
 ## Open
 

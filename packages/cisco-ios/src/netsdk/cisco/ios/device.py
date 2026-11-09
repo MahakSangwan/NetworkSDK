@@ -7,7 +7,11 @@ from typing import ClassVar
 from netsdk.cisco.ios.transport import IOSSSHTransport
 from netsdk.core import Credentials, Device, DeviceConnectionError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
-from netsdk.core.transports.ssh import DEFAULT_KNOWN_HOSTS
+from netsdk.core.transports.ssh import (
+    DEFAULT_KNOWN_HOSTS,
+    DEFAULT_TERMINAL_HEIGHT,
+    DEFAULT_TERMINAL_WIDTH,
+)
 
 
 class CiscoIOS(Device):
@@ -25,12 +29,16 @@ class CiscoIOS(Device):
         session_log_dir: str | PathLike[str] = DEFAULT_SESSION_LOG_DIR,
         known_hosts_file: Path | None = DEFAULT_KNOWN_HOSTS,
         strict_host_keys: bool = False,
+        terminal_width: int = DEFAULT_TERMINAL_WIDTH,
+        terminal_height: int = DEFAULT_TERMINAL_HEIGHT,
     ) -> None:
         super().__init__(
             host, credentials, port=port, timeout=timeout, session_log_dir=session_log_dir
         )
         self.known_hosts_file = known_hosts_file
         self.strict_host_keys = strict_host_keys
+        self.terminal_width = terminal_width
+        self.terminal_height = terminal_height
         self._transport: IOSSSHTransport | None = None
 
     @property
@@ -48,6 +56,8 @@ class CiscoIOS(Device):
             timeout=self.timeout,
             known_hosts_file=self.known_hosts_file,
             strict_host_keys=self.strict_host_keys,
+            terminal_width=self.terminal_width,
+            terminal_height=self.terminal_height,
         )
         transport.open()
         self._transport = transport

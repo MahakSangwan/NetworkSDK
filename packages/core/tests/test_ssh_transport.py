@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 import paramiko
 import pytest
 from netmiko import NetmikoAuthenticationException, NetmikoTimeoutException
+from netmiko.base_connection import BaseConnection
 
 from netsdk.core import (
     AuthenticationError,
@@ -278,6 +279,55 @@ def test_quiet_connection_never_writes_on_its_own(monkeypatch: pytest.MonkeyPatc
     conn.cleanup()
     conn.is_alive()
     assert writes == []
+
+
+def test_quiet_connection_requests_the_configured_terminal_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        BaseConnection,
+        "establish_connection",
+        lambda self, width, height: requested.append((width, height)),
+    )
+    default = _QuietConnection(host="r1", username="ro", password="x", auto_connect=False)
+    short = _QuietConnection(
+        host="r1", username="ro", password="x", auto_connect=False, terminal_height=24
+    )
+    # netmiko's _open() calls it without arguments.
+    default.establish_connection()
+    short.establish_connection()
+    assert requested == [(511, 1000), (511, 24)]
+
+
+def test_transport_passes_terminal_size_to_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def factory(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise OSError("stop here")
+
+    monkeypatch.setattr(ssh_module, "_QuietConnection", factory)
+    transport = SSHTransport(
+        "r1",
+        CREDS,
+        session_log=tmp_path / "x.log",
+        known_hosts_file=tmp_path / "kh",
+        terminal_width=200,
+        terminal_height=24,
+    )
+    with pytest.raises(DeviceConnectionError):
+        transport.open()
+    assert (seen["terminal_width"], seen["terminal_height"]) == (200, 24)
+
+
+@pytest.mark.parametrize("size", [{"terminal_height": 0}, {"terminal_width": 0}])
+def test_zero_terminal_size_is_rejected(tmp_path: Path, size: dict[str, Any]) -> None:
+    # Height 0 would turn the pager off: `terminal length 0` by the back door.
+    with pytest.raises(ValueError, match="at least 1"):
+        SSHTransport("r1", CREDS, session_log=tmp_path / "x.log", **size)
 
 
 def _closed_port() -> int:
