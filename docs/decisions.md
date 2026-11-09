@@ -47,6 +47,7 @@ separate Windows machine with device access (git clone, venv, pip; no uv).
 | D24 | Test helpers ship in core (`netsdk.core.testing`) | Fake CLI for transport/getter unit tests; contract tests will live there too. |
 | D25 | Paging is handled, never side-stepped | The SSH PTY size sets the IOS terminal width/length (verified: 511x1000, netmiko's default, which we keep). A height of 0 would disable the pager like `terminal length 0`, so sizes below 1 are rejected. `terminal_height` is configurable; live tests use 24 to force the pager. |
 | D26 | No switch stacks: facts model a single chassis | None exist in the environment (2026-11-09). If a parser sees more than one stack member it raises `NotSupportedError` rather than return half the truth. Revisit if stacks appear. |
+| D27 | CLI parsing uses ntc-templates (TextFSM) by default, chosen per command | Pure Python, Apache-2.0, works on Windows; already pulled in by netmiko, but declared explicitly by packages that use it. Lives in the parsers layer only: getters map results into our models. Our own parser where a template falls short (fix upstream when we can). A template that matches nothing raises `ParseError`. Genie/pyATS rejected for now: no Windows wheels and heavy; revisit per SDK (IOS-XE, NX-OS). |
 
 ## Open
 
