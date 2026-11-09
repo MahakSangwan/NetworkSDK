@@ -1,5 +1,6 @@
 """Core building blocks shared by netsdk device packages."""
 
+from netsdk.core.capabilities import SupportsFacts
 from netsdk.core.credentials import Credentials
 from netsdk.core.device import Device
 from netsdk.core.exceptions import (
@@ -12,6 +13,7 @@ from netsdk.core.exceptions import (
     NotSupportedError,
     ParseError,
 )
+from netsdk.core.models import Facts, NetSDKModel
 from netsdk.core.transports import Transport
 
 __version__ = "0.1.0"
@@ -23,9 +25,12 @@ __all__ = [
     "Device",
     "DeviceConnectionError",
     "DeviceTimeoutError",
+    "Facts",
     "HostKeyError",
     "NetSDKError",
+    "NetSDKModel",
     "NotSupportedError",
     "ParseError",
+    "SupportsFacts",
     "Transport",
 ]

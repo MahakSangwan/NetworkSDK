@@ -1,11 +1,16 @@
 """Cisco IOS device."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
 from typing import ClassVar
 
+from netsdk.cisco.ios.commands import SHOW_VERSION
+from netsdk.cisco.ios.models import IOSFacts
+from netsdk.cisco.ios.parsers import parse_show_version
 from netsdk.cisco.ios.transport import IOSSSHTransport
-from netsdk.core import Credentials, Device, DeviceConnectionError
+from netsdk.core import Credentials, Device, DeviceConnectionError, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
 from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
@@ -85,3 +90,24 @@ class CiscoIOS(Device):
                 "device is not open; call open() or use it as a context manager", host=self.host
             )
         return self._transport.send_command(command, timeout=timeout)
+
+    # -- getters ------------------------------------------------------------
+
+    def get_facts(self) -> IOSFacts:
+        """Hostname, model, serial number, OS version and uptime."""
+        raw = self.get_facts_raw()
+        with self._attributed():
+            return parse_show_version(raw[SHOW_VERSION])
+
+    def get_facts_raw(self) -> dict[str, str]:
+        return {SHOW_VERSION: self.send_command(SHOW_VERSION)}
+
+    @contextmanager
+    def _attributed(self) -> Iterator[None]:
+        # Parsers don't know the host; add it so batch errors stay attributable.
+        try:
+            yield
+        except NetSDKError as exc:
+            if exc.host is None:
+                exc.host = self.host
+            raise

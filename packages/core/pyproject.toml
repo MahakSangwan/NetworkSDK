@@ -12,7 +12,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ssh = ["netmiko>=4.5"]
+# ntc-templates: default CLI parser engine (D27); pinned so template
+# updates only land when we raise the range and the fixtures still pass.
+ssh = ["netmiko>=4.5", "ntc-templates>=9.3,<10"]
 rest = ["httpx>=0.28"]
 
 [build-system]

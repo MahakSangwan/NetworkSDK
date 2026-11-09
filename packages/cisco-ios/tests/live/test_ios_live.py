@@ -158,6 +158,19 @@ def test_rejected_command_raises_and_session_survives() -> None:
         assert dev.send_command("show clock")
 
 
+# -- getters -------------------------------------------------------------------
+
+
+@needs_device
+def test_get_facts() -> None:
+    with device(configured_creds()) as dev:
+        facts = dev.get_facts()
+        log = dev.session_log
+    print("\n" + "\n".join(f"{name}: {value}" for name, value in facts.model_dump().items()))
+    assert facts.vendor == "Cisco"
+    assert_log_is_clean(log)
+
+
 # -- failures ------------------------------------------------------------------
 
 

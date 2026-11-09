@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "netsdk-core[ssh]>=0.1,<0.2",
+    # Parser engine (D27), declared even though netsdk-core[ssh] brings it.
+    "ntc-templates>=9.3,<10",
 ]
 
 [build-system]

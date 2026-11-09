@@ -611,10 +611,14 @@ version = "0.1.0"
 source = { editable = "packages/cisco-ios" }
 dependencies = [
     { name = "netsdk-core", extra = ["ssh"] },
+    { name = "ntc-templates" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "netsdk-core", extras = ["ssh"], editable = "packages/core" }]
+requires-dist = [
+    { name = "netsdk-core", extras = ["ssh"], editable = "packages/core" },
+    { name = "ntc-templates", specifier = ">=9.3,<10" },
+]
 
 [[package]]
 name = "netsdk-core"
@@ -630,12 +634,14 @@ rest = [
 ]
 ssh = [
     { name = "netmiko" },
+    { name = "ntc-templates" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", marker = "extra == 'rest'", specifier = ">=0.28" },
     { name = "netmiko", marker = "extra == 'ssh'", specifier = ">=4.5" },
+    { name = "ntc-templates", marker = "extra == 'ssh'", specifier = ">=9.3,<10" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 provides-extras = ["ssh", "rest"]

@@ -31,6 +31,11 @@ explicit_package_bases = true
 mypy_path = ["packages/core/src", "packages/cisco-ios/src"]
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# Ships no type information.
+module = ["ntc_templates.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["packages"]
 # importlib mode: every package has its own tests/ dir, and same-named test
