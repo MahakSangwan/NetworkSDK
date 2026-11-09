@@ -44,18 +44,44 @@ def test_session_sends_only_requested_commands(
     assert not device.is_open
 
 
+#: Bytes a real IOS device sent after the pager key (captured 2026-11-09):
+#: " --More-- " is 10 columns, but IOS backs up 9, blanks 8 and backs up 9,
+#: leaving the cursor at column 0 with stray spaces the next line overwrites.
+IOS_PAGER_ERASE = "\b" * 9 + " " * 8 + "\b" * 9
+
+
 def test_ios_pager_is_handled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     pages = [
         "".join(f"GigabitEthernet1/0/{i} is up\r\n" for i in range(1, 23)),
         "".join(f"GigabitEthernet1/0/{i} is up\r\n" for i in range(23, 49)),
     ]
-    # IOS erases " --More-- " with backspaces, spaces, backspaces.
-    cli = FakeCLI({"show interfaces": pages}, hostname="sw1")
+    cli = FakeCLI({"show interfaces": pages}, hostname="sw1", erase=IOS_PAGER_ERASE)
     conn = cli.connection()
     with make_device(monkeypatch, tmp_path, conn) as device:
         output = device.send_command("show interfaces")
     assert output.splitlines() == [f"GigabitEthernet1/0/{i} is up" for i in range(1, 49)]
     assert conn.writes == ["show interfaces\n", " ", "exit\n"]
+
+
+@pytest.mark.parametrize(
+    "next_line",
+    ["     0 output errors, 0 collisions", "", "!", "  ab"],
+    ids=["indented", "blank", "short", "short-indented"],
+)
+def test_ios_pager_erase_leaves_next_line_intact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, next_line: str
+) -> None:
+    # The erase leaves blanks in columns 0 and 9; lines shorter than the
+    # prompt must come out without them.
+    pages = ["     0 pause input\r\n", f"{next_line}\r\n     0 unknown protocol drops\r\n"]
+    cli = FakeCLI({"show interfaces": pages}, hostname="sw1", erase=IOS_PAGER_ERASE)
+    with make_device(monkeypatch, tmp_path, cli.connection()) as device:
+        output = device.send_command("show interfaces")
+    assert output.split("\n") == [
+        "     0 pause input",
+        next_line,
+        "     0 unknown protocol drops",
+    ]
 
 
 @pytest.mark.parametrize(
