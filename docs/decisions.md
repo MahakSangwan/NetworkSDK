@@ -46,6 +46,7 @@ separate Windows machine with device access (git clone, venv, pip; no uv).
 | D23 | Session logs are byte-exact raw captures | Written in binary with netmiko line-ending normalization off, so a sanitized log can become a fixture. `*.raw` fixtures are `-text` in `.gitattributes`. Default dir `session_logs/` (gitignored). |
 | D24 | Test helpers ship in core (`netsdk.core.testing`) | Fake CLI for transport/getter unit tests; contract tests will live there too. |
 | D25 | Paging is handled, never side-stepped | The SSH PTY size sets the IOS terminal width/length (verified: 511x1000, netmiko's default, which we keep). A height of 0 would disable the pager like `terminal length 0`, so sizes below 1 are rejected. `terminal_height` is configurable; live tests use 24 to force the pager. |
+| D26 | No switch stacks: facts model a single chassis | None exist in the environment (2026-11-09). If a parser sees more than one stack member it raises `NotSupportedError` rather than return half the truth. Revisit if stacks appear. |
 
 ## Open
 
