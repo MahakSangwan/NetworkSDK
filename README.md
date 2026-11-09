@@ -6,7 +6,7 @@ package per platform, sharing conventions through `netsdk-core`.
 | Package | Import | Status |
 |---------|--------|--------|
 | `netsdk-core` | `netsdk.core` | in progress |
-| `netsdk-cisco-ios` | `netsdk.cisco.ios` | next |
+| `netsdk-cisco-ios` | `netsdk.cisco.ios` | in progress |
 
 Requires Python 3.12+.
 
@@ -25,7 +25,7 @@ resolves `netsdk-core` from the checkout:
 ```
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e "packages/core[ssh]"
+pip install -e "packages/core[ssh]" -e packages/cisco-ios pytest
 ```
 
 See [docs/decisions.md](docs/decisions.md) for design decisions.

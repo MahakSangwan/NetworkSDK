@@ -14,6 +14,9 @@ wheels/
 .pytest_cache/
 .ruff_cache/
 
+# Device session logs: contain real device output
+session_logs/
+
 # Local live-test inventory and credentials
 inventory*.yaml
 !inventory.example.yaml

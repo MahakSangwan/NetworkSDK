@@ -6,7 +6,8 @@ shadowing builtins such as `ConnectionError` and `TimeoutError`.
 
     NetSDKError
     ├── DeviceConnectionError
-    │   └── AuthenticationError
+    │   ├── AuthenticationError
+    │   └── HostKeyError
     ├── DeviceTimeoutError
     ├── CommandError
     ├── ParseError
@@ -38,6 +39,10 @@ class DeviceConnectionError(NetSDKError):
 
 class AuthenticationError(DeviceConnectionError):
     """The device rejected the supplied credentials."""
+
+
+class HostKeyError(DeviceConnectionError):
+    """The device's SSH host key is unknown (strict mode) or has changed."""
 
 
 class DeviceTimeoutError(NetSDKError):
