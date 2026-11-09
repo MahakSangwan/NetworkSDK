@@ -1,7 +1,8 @@
 """Live tests against a real IOS device. Run manually: `pytest -m live -s`.
 
 Configuration comes from environment variables, never from code. Set a
-password, a key, or both; tests use whatever is configured.
+password, a key, or both; tests log in with whatever is configured. To test
+one auth method on its own, set only that one for the run.
 
     NETSDK_IOS_HOST           device to test (required)
     NETSDK_IOS_PORT           SSH port (default 22)
@@ -14,6 +15,10 @@ password, a key, or both; tests use whatever is configured.
     NETSDK_SESSION_LOG_DIR    where session logs go (default "session_logs")
     NETSDK_LIVE_AUTH_FAILURE  set to 1 to run the deliberate failed-login test
                               (off by default: it can count towards AAA lockout)
+
+Almost everything runs in one shared session: devices limit concurrent SSH
+sessions (often 5 vty lines). Only the vty diagnostic and the failure tests
+open their own.
 """
 
 import logging
@@ -47,21 +52,14 @@ UNREACHABLE_HOST = _env("NETSDK_UNREACHABLE_HOST") or "192.0.2.1"
 LOG_DIR = Path(_env("NETSDK_SESSION_LOG_DIR") or "session_logs")
 AUTH_FAILURE_TEST = _env("NETSDK_LIVE_AUTH_FAILURE") == "1"
 
+#: The shared session uses a 24-line terminal so IOS pages every ~23 lines and
+#: every test exercises the pager (the default 1000-line terminal rarely pages).
+PAGED_HEIGHT = 24
+
 needs_device = pytest.mark.skipif(
     not (HOST and USERNAME and (PASSWORD or KEY_FILE)),
     reason="set NETSDK_IOS_HOST, NETSDK_USERNAME and NETSDK_PASSWORD and/or NETSDK_KEY_FILE",
 )
-needs_password = pytest.mark.skipif(not PASSWORD, reason="no NETSDK_PASSWORD set")
-needs_key = pytest.mark.skipif(not KEY_FILE, reason="no NETSDK_KEY_FILE set")
-
-
-def _key_kwargs() -> dict[str, object]:
-    if not KEY_FILE:
-        return {}
-    return {
-        "key_file": Path(KEY_FILE),
-        "key_passphrase": SecretStr(KEY_PASSPHRASE) if KEY_PASSPHRASE else None,
-    }
 
 
 def configured_creds() -> Credentials:
@@ -70,7 +68,8 @@ def configured_creds() -> Credentials:
     return Credentials(
         username=USERNAME,
         password=SecretStr(PASSWORD) if PASSWORD else None,
-        **_key_kwargs(),
+        key_file=Path(KEY_FILE) if KEY_FILE else None,
+        key_passphrase=SecretStr(KEY_PASSPHRASE) if KEY_PASSPHRASE else None,
     )
 
 
@@ -92,74 +91,42 @@ def assert_log_is_clean(log: Path | None) -> None:
     print(f"\nsession log: {log}")
 
 
-# -- login, one test per auth method --------------------------------------------
-
-
-@needs_device
-@needs_password
-def test_password_login_show_version() -> None:
-    assert USERNAME
-    assert PASSWORD
-    creds = Credentials(username=USERNAME, password=SecretStr(PASSWORD))
-    with device(creds) as dev:
-        output = dev.send_command("show version")
-        log = dev.session_log
-    assert "Cisco IOS" in output
-    assert_log_is_clean(log)
-
-
-@needs_device
-@needs_key
-def test_key_login_show_version() -> None:
-    assert USERNAME
-    creds = Credentials(username=USERNAME, **_key_kwargs())
-    with device(creds) as dev:
-        output = dev.send_command("show version")
-        log = dev.session_log
-    assert "Cisco IOS" in output
-    assert_log_is_clean(log)
-
-
-# -- session behavior, with whatever credentials are configured ----------------
-
-
-@needs_device
-def test_long_output_is_paged_cleanly() -> None:
-    # A 24-line terminal makes IOS page every ~23 lines, so the pager is
-    # exercised on any device (the default 1000-line terminal rarely pages).
-    with device(configured_creds(), timeout=120.0, terminal_height=24) as dev:
-        output = dev.send_command(LONG_COMMAND)
-        log = dev.session_log
-    assert "--More--" not in output
-    assert "\b" not in output
-    assert "\r" not in output
-    assert log is not None
-    pages = log.read_bytes().decode("utf-8", "replace").count("--More--")
-    print(f"\n{LONG_COMMAND!r}: {len(output.splitlines())} lines, pager prompts: {pages}")
-    print("last 5 lines:\n" + "\n".join(output.splitlines()[-5:]))
-    assert pages > 0, "the device never paged; is the command longer than 24 lines?"
-    assert_log_is_clean(log)
-
-
-# Tests below share one session: devices limit concurrent SSH sessions
-# (often 5 vty lines) and some free a closed session's line only after a delay.
-
-
 @pytest.fixture(scope="module")
 def shared() -> Iterator[CiscoIOS]:
-    with device(configured_creds(), timeout=120.0) as dev:
+    with device(configured_creds(), timeout=120.0, terminal_height=PAGED_HEIGHT) as dev:
         yield dev
-    assert_log_is_clean(dev.session_log)
+
+
+# -- session behaviour -----------------------------------------------------------
+
+
+@needs_device
+def test_login_and_show_version(shared: CiscoIOS) -> None:
+    methods = [name for name, value in (("password", PASSWORD), ("key", KEY_FILE)) if value]
+    output = shared.send_command("show version")
+    print(f"\nlogged in with: {' or '.join(methods)}")
+    assert "Cisco IOS" in output
 
 
 @needs_device
 def test_show_terminal(shared: CiscoIOS) -> None:
-    # IOS takes width/length from the PTY we request (511x1000 by default).
+    # IOS takes width/length from the PTY we request.
     output = shared.send_command("show terminal")
-    print(
-        "\n"
-        + "\n".join(line for line in output.splitlines() if "Length" in line or "Width" in line)
-    )
+    sizes = [line for line in output.splitlines() if "Length" in line or "Width" in line]
+    print("\n" + "\n".join(sizes))
+    assert f"Length: {PAGED_HEIGHT} lines" in output
+
+
+@needs_device
+def test_long_output_is_paged_cleanly(shared: CiscoIOS) -> None:
+    output = shared.send_command(LONG_COMMAND)
+    lines = output.splitlines()
+    print(f"\n{LONG_COMMAND!r}: {len(lines)} lines on a {PAGED_HEIGHT}-line terminal")
+    print("last 5 lines:\n" + "\n".join(lines[-5:]))
+    assert len(lines) > PAGED_HEIGHT, "output fits one page; set NETSDK_IOS_LONG_COMMAND"
+    assert "--More--" not in output
+    assert "\b" not in output
+    assert "\r" not in output
 
 
 @needs_device
@@ -173,6 +140,7 @@ def test_rejected_command_raises_and_session_survives(shared: CiscoIOS) -> None:
 @needs_device
 def test_closed_session_frees_its_vty_line(shared: CiscoIOS) -> None:
     # Diagnostic: counts vty lines in use (no names or addresses printed).
+    # Opens the only second session of the run.
     def vty_lines() -> int:
         try:
             output = shared.send_command("show users")
@@ -222,6 +190,19 @@ def test_get_interfaces(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> N
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
     assert interfaces
+
+
+@needs_device
+def test_shared_session_log_is_complete_and_clean(shared: CiscoIOS) -> None:
+    # Last shared test: logs out, then checks the whole session's log.
+    shared.close()
+    log = shared.session_log
+    assert_log_is_clean(log)
+    assert log is not None
+    text = log.read_bytes().decode("utf-8", "replace")
+    print(f"pager prompts answered: {text.count('--More--')}")
+    assert "--More--" in text
+    assert "exit" in text[-200:], "the log doesn't end with our logout"
 
 
 # -- failures ------------------------------------------------------------------

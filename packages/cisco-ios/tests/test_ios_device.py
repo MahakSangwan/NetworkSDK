@@ -111,6 +111,33 @@ def test_session_log_is_per_session(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert log.name.startswith("sw1_")
 
 
+def test_session_log_is_still_known_after_close(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    device = make_device(monkeypatch, tmp_path, FakeCLI({}, hostname="sw1").connection())
+    assert device.session_log is None
+    with device:
+        log = device.session_log
+    assert device.session_log == log
+    assert log is not None
+    assert log.exists()
+
+
+def test_session_log_is_known_after_a_failed_open(tmp_path: Path) -> None:
+    device = CiscoIOS(
+        "127.0.0.1",
+        CREDS,
+        port=1,
+        timeout=2.0,
+        session_log_dir=tmp_path,
+        known_hosts_file=tmp_path / "known_hosts",
+    )
+    with pytest.raises(DeviceConnectionError):
+        device.open()
+    assert device.session_log is not None
+    assert device.session_log.exists()
+
+
 def test_send_command_on_closed_device_raises(tmp_path: Path) -> None:
     device = CiscoIOS("sw1", CREDS, session_log_dir=tmp_path)
     with pytest.raises(DeviceConnectionError, match="not open"):

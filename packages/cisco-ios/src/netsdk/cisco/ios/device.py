@@ -45,6 +45,7 @@ class CiscoIOS(Device):
         self.terminal_width = terminal_width
         self.terminal_height = terminal_height
         self._transport: IOSSSHTransport | None = None
+        self._session_log: Path | None = None
 
     @property
     def is_open(self) -> bool:
@@ -53,10 +54,12 @@ class CiscoIOS(Device):
     def open(self) -> None:
         if self.is_open:
             return
+        # Remembered before connecting: a failed login's log is the useful one.
+        self._session_log = self.new_session_log_path()
         transport = self.transport_class(
             self.host,
             self.credentials,
-            session_log=self.new_session_log_path(),
+            session_log=self._session_log,
             port=self.port or 22,
             timeout=self.timeout,
             known_hosts_file=self.known_hosts_file,
@@ -76,8 +79,9 @@ class CiscoIOS(Device):
 
     @property
     def session_log(self) -> Path | None:
-        """Log file of the current (or last opened) session."""
-        return self._transport.session_log if self._transport is not None else None
+        """Log file of the current or most recent session, also after close()
+        or a failed open(). None until open() is first called."""
+        return self._session_log
 
     def send_command(self, command: str, *, timeout: float | None = None) -> str:
         """Run one CLI command and return its raw text output.
