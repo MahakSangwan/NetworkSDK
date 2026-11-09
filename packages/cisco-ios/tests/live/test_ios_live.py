@@ -18,6 +18,8 @@ password, a key, or both; tests use whatever is configured.
 
 import logging
 import os
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -139,11 +141,21 @@ def test_long_output_is_paged_cleanly() -> None:
     assert_log_is_clean(log)
 
 
+# Tests below share one session: devices limit concurrent SSH sessions
+# (often 5 vty lines) and some free a closed session's line only after a delay.
+
+
+@pytest.fixture(scope="module")
+def shared() -> Iterator[CiscoIOS]:
+    with device(configured_creds(), timeout=120.0) as dev:
+        yield dev
+    assert_log_is_clean(dev.session_log)
+
+
 @needs_device
-def test_show_terminal() -> None:
+def test_show_terminal(shared: CiscoIOS) -> None:
     # IOS takes width/length from the PTY we request (511x1000 by default).
-    with device(configured_creds()) as dev:
-        output = dev.send_command("show terminal")
+    output = shared.send_command("show terminal")
     print(
         "\n"
         + "\n".join(line for line in output.splitlines() if "Length" in line or "Width" in line)
@@ -151,32 +163,52 @@ def test_show_terminal() -> None:
 
 
 @needs_device
-def test_rejected_command_raises_and_session_survives() -> None:
-    with device(configured_creds()) as dev:
-        with pytest.raises(CommandError) as excinfo:
-            dev.send_command("show netsdk-no-such-command")
-        print(f"\nrejected as: {excinfo.value}")
-        assert dev.send_command("show clock")
+def test_rejected_command_raises_and_session_survives(shared: CiscoIOS) -> None:
+    with pytest.raises(CommandError) as excinfo:
+        shared.send_command("show netsdk-no-such-command")
+    print(f"\nrejected as: {excinfo.value}")
+    assert shared.send_command("show clock")
+
+
+@needs_device
+def test_closed_session_frees_its_vty_line(shared: CiscoIOS) -> None:
+    # Diagnostic: counts vty lines in use (no names or addresses printed).
+    def vty_lines() -> int:
+        try:
+            output = shared.send_command("show users")
+        except CommandError:
+            pytest.skip("`show users` is not permitted for this account")
+        return sum(" vty " in line for line in output.splitlines())
+
+    before = vty_lines()
+    with device(configured_creds()) as extra:
+        during = vty_lines()
+        extra.send_command("show clock")
+    after = [vty_lines()]
+    for _ in range(3):
+        time.sleep(5)
+        after.append(vty_lines())
+    print(
+        f"\nvty lines in use: before {before}, during {during}, after close (0/5/10/15 s) {after}"
+    )
+    assert during == before + 1, "the extra session didn't show up in `show users`"
+    assert after[-1] == before, "the closed session still holds a vty line after 15 s"
 
 
 # -- getters -------------------------------------------------------------------
 
 
 @needs_device
-def test_get_facts() -> None:
-    with device(configured_creds()) as dev:
-        facts = dev.get_facts()
-        log = dev.session_log
+def test_get_facts(shared: CiscoIOS) -> None:
+    facts = shared.get_facts()
     print("\n" + "\n".join(f"{name}: {value}" for name, value in facts.model_dump().items()))
     assert facts.vendor == "Cisco"
-    assert_log_is_clean(log)
 
 
 @needs_device
-def test_get_interfaces(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING), device(configured_creds(), timeout=120.0) as dev:
-        interfaces = dev.get_interfaces()
-        log = dev.session_log
+def test_get_interfaces(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        interfaces = shared.get_interfaces()
     print(f"\n{len(interfaces)} interfaces")
     # No MACs or descriptions: this output gets pasted back for review.
     print(f"{'name':<28} {'en':<3} {'up':<3} {'speed':>10} {'duplex':<6} {'mtu':>5}")
@@ -190,7 +222,6 @@ def test_get_interfaces(caplog: pytest.LogCaptureFixture) -> None:
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
     assert interfaces
-    assert_log_is_clean(log)
 
 
 # -- failures ------------------------------------------------------------------
