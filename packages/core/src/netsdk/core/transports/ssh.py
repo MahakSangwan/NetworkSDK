@@ -206,7 +206,9 @@ class SSHTransport:
 
         terms = re.escape(self.prompt_terminators)
         self._terms = terms
-        self._any_prompt_re = re.compile(rf"(?:^|\n)(?P<base>[^\s{terms}]+)[{terms}]\s*$")
+        # Hostnames never contain "<", so banner lines like "<WARNING>" can't
+        # be mistaken for a prompt.
+        self._any_prompt_re = re.compile(rf"(?:^|\n)(?P<base>[^\s<{terms}]+)[{terms}]\s*$")
         self._pager_re = (
             re.compile(rf"(?:{self.pager_pattern})\s*$") if self.pager_pattern else None
         )

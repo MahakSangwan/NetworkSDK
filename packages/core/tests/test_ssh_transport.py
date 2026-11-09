@@ -109,7 +109,10 @@ def test_banner_lines_ending_in_hash_are_not_prompts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cli = FakeCLI({})
-    conn = cli.connection(initial=["#####\r\n# Authorized use only #\r\n", "core-sw1>"])
+    # Each chunk ends where a prompt could be; only the last one is real.
+    conn = cli.connection(
+        initial=["#####\r\n# Authorized use only #\r\n<WARNING>", "\r\ncore-sw1>"]
+    )
     transport = make_transport(monkeypatch, tmp_path, conn)
     transport.open()
     assert transport.base_prompt == "core-sw1"
