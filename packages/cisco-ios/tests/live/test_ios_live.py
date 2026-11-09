@@ -16,6 +16,7 @@ password, a key, or both; tests use whatever is configured.
                               (off by default: it can count towards AAA lockout)
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,27 @@ def test_get_facts() -> None:
         log = dev.session_log
     print("\n" + "\n".join(f"{name}: {value}" for name, value in facts.model_dump().items()))
     assert facts.vendor == "Cisco"
+    assert_log_is_clean(log)
+
+
+@needs_device
+def test_get_interfaces(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING), device(configured_creds(), timeout=120.0) as dev:
+        interfaces = dev.get_interfaces()
+        log = dev.session_log
+    print(f"\n{len(interfaces)} interfaces")
+    # No MACs or descriptions: this output gets pasted back for review.
+    print(f"{'name':<28} {'en':<3} {'up':<3} {'speed':>10} {'duplex':<6} {'mtu':>5}")
+    for i in interfaces:
+        print(
+            f"{i.name:<28} {i.enabled!s:<3.1} {i.oper_up!s:<3.1} {i.speed or '-':>10} "
+            f"{i.duplex or '-':<6} {i.mtu or '-':>5}"
+        )
+    with_mac = sum(i.mac_address is not None for i in interfaces)
+    print(f"{with_mac} of {len(interfaces)} have a MAC address")
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    assert interfaces
     assert_log_is_clean(log)
 
 

@@ -1,6 +1,6 @@
 """IOS-specific models."""
 
-from netsdk.core import Facts
+from netsdk.core import Facts, Interface, MacAddress
 
 
 class IOSFacts(Facts):
@@ -12,3 +12,19 @@ class IOSFacts(Facts):
     running_image: str | None = None
     config_register: str | None = None
     reload_reason: str | None = None
+
+
+class IOSInterface(Interface):
+    """Interface plus what IOS `show interfaces` adds. Extras are None when absent."""
+
+    #: State as printed, e.g. "up", "down", "administratively down", "reset".
+    link_status: str
+    #: Line protocol as printed, e.g. "up (connected)", "down (err-disabled)".
+    protocol_status: str
+    #: e.g. "Gigabit Ethernet", "EtherSVI", "Loopback".
+    hardware_type: str | None = None
+    #: e.g. "10/100/1000BaseTX", "Not Present".
+    media_type: str | None = None
+    burned_in_address: MacAddress | None = None
+    #: Configured bandwidth (`BW`) in kbit/s; the routing-metric figure, not link speed.
+    bandwidth: int | None = None

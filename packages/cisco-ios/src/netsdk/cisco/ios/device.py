@@ -6,9 +6,9 @@ from os import PathLike
 from pathlib import Path
 from typing import ClassVar
 
-from netsdk.cisco.ios.commands import SHOW_VERSION
-from netsdk.cisco.ios.models import IOSFacts
-from netsdk.cisco.ios.parsers import parse_show_version
+from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_VERSION
+from netsdk.cisco.ios.models import IOSFacts, IOSInterface
+from netsdk.cisco.ios.parsers import parse_show_interfaces, parse_show_version
 from netsdk.cisco.ios.transport import IOSSSHTransport
 from netsdk.core import Credentials, Device, DeviceConnectionError, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
@@ -101,6 +101,15 @@ class CiscoIOS(Device):
 
     def get_facts_raw(self) -> dict[str, str]:
         return {SHOW_VERSION: self.send_command(SHOW_VERSION)}
+
+    def get_interfaces(self) -> list[IOSInterface]:
+        """Every interface with admin/oper state, MAC, MTU, speed and duplex."""
+        raw = self.get_interfaces_raw()
+        with self._attributed():
+            return parse_show_interfaces(raw[SHOW_INTERFACES])
+
+    def get_interfaces_raw(self) -> dict[str, str]:
+        return {SHOW_INTERFACES: self.send_command(SHOW_INTERFACES)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

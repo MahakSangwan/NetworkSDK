@@ -1,9 +1,9 @@
 """netsdk SDK for Cisco IOS (classic)."""
 
 from netsdk.cisco.ios.device import CiscoIOS
-from netsdk.cisco.ios.models import IOSFacts
+from netsdk.cisco.ios.models import IOSFacts, IOSInterface
 from netsdk.cisco.ios.transport import IOSSSHTransport
 
 __version__ = "0.1.0"
 
-__all__ = ["CiscoIOS", "IOSFacts", "IOSSSHTransport"]
+__all__ = ["CiscoIOS", "IOSFacts", "IOSInterface", "IOSSSHTransport"]
