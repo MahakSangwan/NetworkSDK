@@ -38,6 +38,7 @@ from netsdk.core import (
     Credentials,
     DeviceConnectionError,
     IPAddress,
+    NotSupportedError,
 )
 
 pytestmark = pytest.mark.live
@@ -216,6 +217,25 @@ def test_get_ip_addresses(shared: CiscoIOS) -> None:
     interface_names = {i.name for i in shared.get_interfaces()}
     unknown = sorted(set(by_interface) - interface_names)
     assert not unknown, f"addresses on interfaces get_interfaces() doesn't list: {unknown}"
+
+
+@needs_device
+def test_get_vlans(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        try:
+            vlans = shared.get_vlans()
+        except NotSupportedError:
+            pytest.skip("device has no VLANs (router?)")
+    # No VLAN names: this output gets pasted back for review.
+    print(f"\n{len(vlans)} VLANs")
+    print(f"{'id':>5} {'active':<6} {'status':<10} {'access ports'}")
+    for v in vlans:
+        print(f"{v.vlan_id:>5} {v.active!s:<6} {v.status:<10} {len(v.interfaces)}")
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted({p for v in vlans for p in v.interfaces} - interface_names)
+    assert not unknown, f"VLAN ports that get_interfaces() doesn't list: {unknown}"
 
 
 @needs_device

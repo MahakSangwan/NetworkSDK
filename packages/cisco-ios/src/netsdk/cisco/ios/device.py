@@ -6,15 +6,29 @@ from os import PathLike
 from pathlib import Path
 from typing import ClassVar
 
-from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_IP_INTERFACE, SHOW_VERSION
-from netsdk.cisco.ios.models import IOSFacts, IOSInterface
+from netsdk.cisco.ios.commands import (
+    SHOW_INTERFACES,
+    SHOW_IP_INTERFACE,
+    SHOW_VERSION,
+    SHOW_VLAN_BRIEF,
+)
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface
 from netsdk.cisco.ios.parsers import (
     parse_show_interfaces,
     parse_show_ip_interface,
     parse_show_version,
+    parse_show_vlan_brief,
 )
 from netsdk.cisco.ios.transport import IOSSSHTransport
-from netsdk.core import Credentials, Device, DeviceConnectionError, IPAddress, NetSDKError
+from netsdk.core import (
+    CommandError,
+    Credentials,
+    Device,
+    DeviceConnectionError,
+    IPAddress,
+    NetSDKError,
+    NotSupportedError,
+)
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
 from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
@@ -130,6 +144,27 @@ class CiscoIOS(Device):
 
     def get_ip_addresses_raw(self) -> dict[str, str]:
         return {SHOW_IP_INTERFACE: self.send_command(SHOW_IP_INTERFACE)}
+
+    def get_vlans(self) -> list[IOSVLAN]:
+        """VLANs with their access ports (full names). Trunks are not included.
+
+        Raises NotSupportedError on a device without VLANs (e.g. a router
+        without switch ports), so that's distinct from "no VLANs".
+        """
+        raw = self.get_vlans_raw()
+        with self._attributed():
+            return parse_show_vlan_brief(raw[SHOW_VLAN_BRIEF])
+
+    def get_vlans_raw(self) -> dict[str, str]:
+        try:
+            return {SHOW_VLAN_BRIEF: self.send_command(SHOW_VLAN_BRIEF)}
+        except CommandError as exc:
+            # Only "% Invalid input": an authorization failure stays an error.
+            if exc.output and "% Invalid input" in exc.output:
+                raise NotSupportedError(
+                    f"{SHOW_VLAN_BRIEF!r} is not available: no VLAN support", host=self.host
+                ) from exc
+            raise
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

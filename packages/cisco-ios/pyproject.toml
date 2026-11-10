@@ -11,6 +11,8 @@ dependencies = [
     "netsdk-core[ssh]>=0.1,<0.2",
     # Parser engine (D27), declared even though netsdk-core[ssh] brings it.
     "ntc-templates>=9.3,<10",
+    # Expands IOS abbreviations (Gi1/0/1) to full names (D29).
+    "netutils>=1.19,<2",
 ]
 
 [build-system]

@@ -11,8 +11,14 @@ from datetime import timedelta
 from ipaddress import ip_address
 from typing import Any
 
-from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_IP_INTERFACE, SHOW_VERSION
-from netsdk.cisco.ios.models import IOSFacts, IOSInterface
+from netsdk.cisco.ios.commands import (
+    SHOW_INTERFACES,
+    SHOW_IP_INTERFACE,
+    SHOW_VERSION,
+    SHOW_VLAN_BRIEF,
+)
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface
+from netsdk.cisco.ios.names import full_interface_name
 from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import parse_textfsm
@@ -178,3 +184,26 @@ def parse_show_ip_interface(output: str) -> list[IPAddress]:
                     f"{name}: unreadable address {ip!r} prefix {prefix!r}; expected address/length"
                 ) from exc
     return addresses
+
+
+# -- show vlan brief ---------------------------------------------------------
+
+
+def parse_show_vlan_brief(output: str) -> list[IOSVLAN]:
+    # ntc-templates' `show vlan` template reads the first table and stops at
+    # the second; `show vlan brief` prints only that first table.
+    vlans = [
+        IOSVLAN(
+            vlan_id=int(row["vlan_id"]),
+            name=row["vlan_name"] or None,
+            active=row["status"] == "active",
+            interfaces=tuple(full_interface_name(name) for name in row["interfaces"]),
+            status=row["status"],
+        )
+        for row in parse_textfsm(PLATFORM, SHOW_VLAN_BRIEF, output)
+    ]
+    ids = [vlan.vlan_id for vlan in vlans]
+    if len(set(ids)) != len(ids):
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        raise ParseError(f"{SHOW_VLAN_BRIEF!r} lists VLAN {duplicates} more than once")
+    return vlans

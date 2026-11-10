@@ -611,12 +611,14 @@ version = "0.1.0"
 source = { editable = "packages/cisco-ios" }
 dependencies = [
     { name = "netsdk-core", extra = ["ssh"] },
+    { name = "netutils" },
     { name = "ntc-templates" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "netsdk-core", extras = ["ssh"], editable = "packages/core" },
+    { name = "netutils", specifier = ">=1.19,<2" },
     { name = "ntc-templates", specifier = ">=9.3,<10" },
 ]
 
@@ -645,6 +647,15 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11" },
 ]
 provides-extras = ["ssh", "rest"]
+
+[[package]]
+name = "netutils"
+version = "1.19.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/31/7e790b2a6c2e65ad1263f024e76909cf50a7de4eabd90d72ba7ac603a449/netutils-1.19.2.tar.gz", hash = "sha256:88dc05f93ab585203ab2c54bc89e7e9617eec536a6e0d3b1b58c0e594e9d67aa", size = 550105, upload-time = "2026-09-23T14:04:32.911Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/26/0ec1ec7a792e09d29b907a4ad86f3f258af3b8fb685f75621ab0c015d405/netutils-1.19.2-py3-none-any.whl", hash = "sha256:cae23538d670da9e38b271d1666c77181a2460088afa772ffe94370adc36a46f", size = 565795, upload-time = "2026-09-23T14:04:31.273Z" },
+]
 
 [[package]]
 name = "ntc-templates"

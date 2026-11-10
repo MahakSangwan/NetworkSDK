@@ -1,6 +1,6 @@
 """IOS-specific models."""
 
-from netsdk.core import Facts, Interface, MacAddress
+from netsdk.core import VLAN, Facts, Interface, MacAddress
 
 
 class IOSFacts(Facts):
@@ -28,3 +28,10 @@ class IOSInterface(Interface):
     burned_in_address: MacAddress | None = None
     #: Configured bandwidth (`BW`) in kbit/s; the routing-metric figure, not link speed.
     bandwidth: int | None = None
+
+
+class IOSVLAN(VLAN):
+    """VLAN plus its IOS status string."""
+
+    #: As printed: "active", "act/lshut", "act/unsup", "suspended", ...
+    status: str

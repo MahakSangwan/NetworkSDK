@@ -66,3 +66,15 @@ class IPAddress(NetSDKModel):
     secondary: bool = False
     #: VRF name; None is the global (default) routing table.
     vrf: str | None = None
+
+
+class VLAN(NetSDKModel):
+    """One VLAN as the device reports it."""
+
+    vlan_id: int = Field(ge=1, le=4094)
+    name: str | None = None
+    #: Usable: exists and is not shut down or suspended.
+    active: bool
+    #: Full names of the ports carrying it untagged (access ports), joining
+    #: `Interface.name`. Trunk membership is a separate getter.
+    interfaces: tuple[str, ...] = ()

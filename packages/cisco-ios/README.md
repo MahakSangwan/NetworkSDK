@@ -18,6 +18,7 @@ with CiscoIOS("10.0.0.1", creds) as device:
 | `get_facts()` | `show version` | Switch stacks raise `NotSupportedError` (D26). |
 | `get_interfaces()` | `show interfaces` | No counters, IPs or switchport mode; those are separate getters. |
 | `get_ip_addresses()` | `show ip interface` | One record per address, with VRF. IPv4 only for now; unnumbered interfaces have none. |
+| `get_vlans()` | `show vlan brief` | Access ports only (trunks come later). `NotSupportedError` on devices without VLANs. |
 
 Output is parsed with ntc-templates (D27); output that doesn't parse raises
 `ParseError`, never an empty or partial model.
