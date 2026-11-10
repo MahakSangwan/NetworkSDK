@@ -32,7 +32,13 @@ import pytest
 from pydantic import SecretStr
 
 from netsdk.cisco.ios import CiscoIOS
-from netsdk.core import AuthenticationError, CommandError, Credentials, DeviceConnectionError
+from netsdk.core import (
+    AuthenticationError,
+    CommandError,
+    Credentials,
+    DeviceConnectionError,
+    IPAddress,
+)
 
 pytestmark = pytest.mark.live
 
@@ -190,6 +196,26 @@ def test_get_interfaces(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> N
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
     assert interfaces
+
+
+@needs_device
+def test_get_ip_addresses(shared: CiscoIOS) -> None:
+    addresses = shared.get_ip_addresses()
+    # No addresses or VRF names: this output gets pasted back for review.
+    vrfs = sorted({a.vrf for a in addresses if a.vrf})
+    print(f"\n{len(addresses)} addresses in {len(vrfs)} VRF(s) plus the global table")
+    print(f"{'interface':<28} {'prefixes':<16} {'secondary':<9} {'vrf'}")
+    by_interface: dict[str, list[IPAddress]] = {}
+    for address in addresses:
+        by_interface.setdefault(address.interface, []).append(address)
+    for name, records in by_interface.items():
+        prefixes = ",".join(f"/{a.address.network.prefixlen}" for a in records)
+        secondary = "yes" if any(a.secondary for a in records) else "-"
+        vrf = f"VRF {vrfs.index(records[0].vrf) + 1}" if records[0].vrf else "global"
+        print(f"{name:<28} {prefixes:<16} {secondary:<9} {vrf}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted(set(by_interface) - interface_names)
+    assert not unknown, f"addresses on interfaces get_interfaces() doesn't list: {unknown}"
 
 
 @needs_device

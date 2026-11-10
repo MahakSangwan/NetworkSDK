@@ -6,11 +6,15 @@ from os import PathLike
 from pathlib import Path
 from typing import ClassVar
 
-from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_VERSION
+from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_IP_INTERFACE, SHOW_VERSION
 from netsdk.cisco.ios.models import IOSFacts, IOSInterface
-from netsdk.cisco.ios.parsers import parse_show_interfaces, parse_show_version
+from netsdk.cisco.ios.parsers import (
+    parse_show_interfaces,
+    parse_show_ip_interface,
+    parse_show_version,
+)
 from netsdk.cisco.ios.transport import IOSSSHTransport
-from netsdk.core import Credentials, Device, DeviceConnectionError, NetSDKError
+from netsdk.core import Credentials, Device, DeviceConnectionError, IPAddress, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
 from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
@@ -114,6 +118,18 @@ class CiscoIOS(Device):
 
     def get_interfaces_raw(self) -> dict[str, str]:
         return {SHOW_INTERFACES: self.send_command(SHOW_INTERFACES)}
+
+    def get_ip_addresses(self) -> list[IPAddress]:
+        """IPv4 addresses (primary and secondary) with their interface and VRF.
+
+        IPv6 is not collected yet: the model supports it, the getter doesn't.
+        """
+        raw = self.get_ip_addresses_raw()
+        with self._attributed():
+            return parse_show_ip_interface(raw[SHOW_IP_INTERFACE])
+
+    def get_ip_addresses_raw(self) -> dict[str, str]:
+        return {SHOW_IP_INTERFACE: self.send_command(SHOW_IP_INTERFACE)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

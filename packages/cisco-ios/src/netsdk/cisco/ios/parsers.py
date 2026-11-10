@@ -8,11 +8,12 @@ don't support. Raised errors carry no host; the device adds it.
 import logging
 import re
 from datetime import timedelta
+from ipaddress import ip_address
 from typing import Any
 
-from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_VERSION
+from netsdk.cisco.ios.commands import SHOW_INTERFACES, SHOW_IP_INTERFACE, SHOW_VERSION
 from netsdk.cisco.ios.models import IOSFacts, IOSInterface
-from netsdk.core import Duplex, NotSupportedError, ParseError
+from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import parse_textfsm
 
@@ -145,3 +146,35 @@ def _duplex(name: str, text: str) -> Duplex | None:
     if duplex is None:
         log.warning("%s: unrecognised duplex %r", name, text)
     return duplex
+
+
+# -- show ip interface -------------------------------------------------------
+
+
+def parse_show_ip_interface(output: str) -> list[IPAddress]:
+    """One record per address. IOS lists the primary first, then secondaries."""
+    addresses: list[IPAddress] = []
+    for row in parse_textfsm(PLATFORM, SHOW_IP_INTERFACE, output):
+        name = row["interface"]
+        for index, (ip, prefix) in enumerate(
+            zip(row["ip_address"], row["prefix_length"], strict=True)
+        ):
+            # Check both halves: a bare "10.0.0.1" would otherwise become /32,
+            # and the template splits it into "10.0.0." and "1".
+            try:
+                ip_address(ip)
+                if not prefix:
+                    raise ValueError("no prefix length")
+                addresses.append(
+                    IPAddress(
+                        interface=name,
+                        address=f"{ip}/{prefix}",
+                        secondary=index > 0,
+                        vrf=row["vrf"] or None,
+                    )
+                )
+            except ValueError as exc:
+                raise ParseError(
+                    f"{name}: unreadable address {ip!r} prefix {prefix!r}; expected address/length"
+                ) from exc
+    return addresses

@@ -6,6 +6,7 @@ a snapshot, not something to edit.
 """
 
 from datetime import timedelta
+from ipaddress import IPv4Interface, IPv6Interface
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,3 +49,20 @@ class Interface(NetSDKModel):
     #: that is down. None when it only says auto.
     speed: int | None = Field(default=None, gt=0)
     duplex: Duplex | None = None
+
+
+class IPAddress(NetSDKModel):
+    """One address configured on one interface (an interface may have several).
+
+    Unnumbered interfaces have no address of their own and produce no record;
+    the address belongs to the interface it is configured on.
+    """
+
+    #: Same string as `Interface.name`, so the two join directly.
+    interface: str = Field(min_length=1)
+    #: Address with its prefix length, e.g. IPv4Interface("10.0.0.1/24").
+    address: IPv4Interface | IPv6Interface
+    #: An IOS-style secondary address; False for the primary.
+    secondary: bool = False
+    #: VRF name; None is the global (default) routing table.
+    vrf: str | None = None

@@ -2,3 +2,4 @@
 
 SHOW_VERSION = "show version"
 SHOW_INTERFACES = "show interfaces"
+SHOW_IP_INTERFACE = "show ip interface"

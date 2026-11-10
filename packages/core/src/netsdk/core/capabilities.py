@@ -8,7 +8,7 @@ the unparsed output keyed by the command or endpoint it came from.
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
-from netsdk.core.models import Facts, Interface
+from netsdk.core.models import Facts, Interface, IPAddress
 
 
 @runtime_checkable
@@ -23,3 +23,10 @@ class SupportsInterfaces(Protocol):
     def get_interfaces(self) -> Sequence[Interface]: ...
 
     def get_interfaces_raw(self) -> dict[str, str]: ...
+
+
+@runtime_checkable
+class SupportsIPAddresses(Protocol):
+    def get_ip_addresses(self) -> Sequence[IPAddress]: ...
+
+    def get_ip_addresses_raw(self) -> dict[str, str]: ...
