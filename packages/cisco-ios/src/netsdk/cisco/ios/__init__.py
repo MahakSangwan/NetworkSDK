@@ -5,6 +5,7 @@ from netsdk.cisco.ios.models import (
     IOSVLAN,
     IOSFacts,
     IOSInterface,
+    IOSNeighbor,
     IOSSwitchport,
     IOSVTPStatus,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "CiscoIOS",
     "IOSFacts",
     "IOSInterface",
+    "IOSNeighbor",
     "IOSSSHTransport",
     "IOSSwitchport",
     "IOSVTPStatus",

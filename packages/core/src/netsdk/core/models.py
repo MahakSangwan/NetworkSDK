@@ -6,7 +6,7 @@ a snapshot, not something to edit.
 """
 
 from datetime import timedelta
-from ipaddress import IPv4Interface, IPv6Interface
+from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -110,3 +110,36 @@ class Switchport(NetSDKModel):
             if list(self.allowed_vlans) != sorted(set(self.allowed_vlans)):
                 raise ValueError("allowed_vlans must be sorted and unique")
         return self
+
+
+NeighborProtocol = Literal["cdp", "lldp"]
+
+
+class Neighbor(NetSDKModel):
+    """One neighbor seen on one local port, by one discovery protocol.
+
+    Remote values are as the neighbor advertised them: names, ports and
+    chassis IDs are not expanded or normalized, since we don't know the
+    neighbor's OS. A neighbor seen by both CDP and LLDP gives two records.
+    """
+
+    protocol: NeighborProtocol
+    #: Full local name, joining `Interface.name`. None only when the device
+    #: doesn't print it (some older IOS releases in LLDP detail output).
+    local_interface: str | None
+    #: CDP device ID or LLDP system name; None when not advertised.
+    remote_name: str | None = None
+    #: CDP port ID or LLDP port ID.
+    remote_port: str | None = None
+    #: LLDP port description.
+    remote_port_description: str | None = None
+    #: LLDP chassis ID, as advertised (often, not always, a MAC address).
+    remote_chassis_id: str | None = None
+    #: CDP platform, e.g. "cisco WS-C3850-24T".
+    remote_platform: str | None = None
+    #: CDP software version text or LLDP system description.
+    remote_description: str | None = None
+    management_addresses: tuple[IPv4Address | IPv6Address, ...] = ()
+    #: Lowercase names: CDP's words ("router", "switch", "igmp") or LLDP's
+    #: codes expanded ("bridge", "router", "telephone", ...).
+    capabilities: tuple[str, ...] = ()

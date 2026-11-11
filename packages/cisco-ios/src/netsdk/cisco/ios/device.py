@@ -1,5 +1,6 @@
 """Cisco IOS device."""
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from os import PathLike
@@ -7,18 +8,30 @@ from pathlib import Path
 from typing import ClassVar
 
 from netsdk.cisco.ios.commands import (
+    SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACES,
     SHOW_INTERFACES_SWITCHPORT,
     SHOW_IP_INTERFACE,
+    SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSSwitchport, IOSVTPStatus
+from netsdk.cisco.ios.models import (
+    IOSVLAN,
+    IOSFacts,
+    IOSInterface,
+    IOSNeighbor,
+    IOSSwitchport,
+    IOSVTPStatus,
+)
 from netsdk.cisco.ios.parsers import (
+    neighbor_protocol_off,
+    parse_show_cdp_neighbors_detail,
     parse_show_interfaces,
     parse_show_interfaces_switchport,
     parse_show_ip_interface,
+    parse_show_lldp_neighbors_detail,
     parse_show_version,
     parse_show_vlan_brief,
     parse_show_vtp_status,
@@ -39,6 +52,8 @@ from netsdk.core.transports.ssh import (
     DEFAULT_TERMINAL_HEIGHT,
     DEFAULT_TERMINAL_WIDTH,
 )
+
+log = logging.getLogger(__name__)
 
 
 class CiscoIOS(Device):
@@ -179,6 +194,40 @@ class CiscoIOS(Device):
                 SHOW_INTERFACES_SWITCHPORT, "no switch ports"
             )
         }
+
+    def get_neighbors(self) -> list[IOSNeighbor]:
+        """CDP neighbors, then LLDP neighbors, each tagged with its protocol.
+
+        A protocol that is disabled (or unknown to this IOS) contributes no
+        neighbors and is logged; NotSupportedError only when neither command
+        exists.
+        """
+        raw = self.get_neighbors_raw()
+        cdp, lldp = raw[SHOW_CDP_NEIGHBORS_DETAIL], raw[SHOW_LLDP_NEIGHBORS_DETAIL]
+        unknown = [c for c, out in raw.items() if "% Invalid input" in out]
+        if len(unknown) == len(raw):
+            raise NotSupportedError("neither CDP nor LLDP is available", host=self.host)
+        for command, output in raw.items():
+            if neighbor_protocol_off(output):
+                log.info("%s: %r: %s", self.host, command, output.strip().splitlines()[0])
+        with self._attributed():
+            return parse_show_cdp_neighbors_detail(cdp) + parse_show_lldp_neighbors_detail(lldp)
+
+    def get_neighbors_raw(self) -> dict[str, str]:
+        """Both commands' output; "% Invalid input" is kept as output, not raised."""
+        return {
+            command: self._send_keeping_invalid_input(command)
+            for command in (SHOW_CDP_NEIGHBORS_DETAIL, SHOW_LLDP_NEIGHBORS_DETAIL)
+        }
+
+    def _send_keeping_invalid_input(self, command: str) -> str:
+        try:
+            return self.send_command(command)
+        except CommandError as exc:
+            # Only "% Invalid input": an authorization failure stays an error.
+            if exc.output and "% Invalid input" in exc.output:
+                return exc.output
+            raise
 
     def get_vtp_status(self) -> IOSVTPStatus:
         """VTP version, domain, mode and revision of the VLAN database.

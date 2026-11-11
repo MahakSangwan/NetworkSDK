@@ -1,11 +1,20 @@
 """IOS-specific models."""
 
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv6Address
 from typing import Literal
 
 from pydantic import Field
 
-from netsdk.core import VLAN, Facts, Interface, MacAddress, NetSDKModel, Switchport
+from netsdk.core import (
+    VLAN,
+    Duplex,
+    Facts,
+    Interface,
+    MacAddress,
+    Neighbor,
+    NetSDKModel,
+    Switchport,
+)
 
 VTPMode = Literal["server", "primary server", "client", "transparent", "off"]
 
@@ -94,3 +103,14 @@ class IOSSwitchport(Switchport):
     negotiation: bool | None = None
     #: Operational trunking encapsulation, e.g. "dot1q", "native".
     encapsulation: str | None = None
+
+
+class IOSNeighbor(Neighbor):
+    """Neighbor plus what IOS CDP/LLDP detail output adds."""
+
+    #: CDP "Entry address(es)": where the CDP packet came from.
+    entry_addresses: tuple[IPv4Address | IPv6Address, ...] = ()
+    #: CDP native VLAN, or LLDP port VLAN ID, as the neighbor advertises it.
+    native_vlan: int | None = None
+    #: CDP only.
+    duplex: Duplex | None = None

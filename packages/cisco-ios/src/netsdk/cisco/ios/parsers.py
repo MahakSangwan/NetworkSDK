@@ -9,21 +9,30 @@ happens here. Raised errors carry no host; the device adds it.
 import logging
 import re
 from datetime import timedelta
-from ipaddress import ip_address
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Any, Literal
 
 from netutils.vlan import vlanconfig_to_list
 from pydantic import ValidationError
 
 from netsdk.cisco.ios.commands import (
+    SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACES,
     SHOW_INTERFACES_SWITCHPORT,
     SHOW_IP_INTERFACE,
+    SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSSwitchport, IOSVTPStatus
+from netsdk.cisco.ios.models import (
+    IOSVLAN,
+    IOSFacts,
+    IOSInterface,
+    IOSNeighbor,
+    IOSSwitchport,
+    IOSVTPStatus,
+)
 from netsdk.cisco.ios.names import full_interface_name
 from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
@@ -347,3 +356,168 @@ def _allowed_vlans(name: str, value: str | None) -> tuple[bool, tuple[int, ...] 
         raise ParseError(
             f"{SHOW_INTERFACES_SWITCHPORT!r}: unreadable allowed VLANs {value!r} on {name}"
         ) from exc
+
+
+# -- neighbors: show cdp neighbors detail (Genie), show lldp ... (ntc, D35) ----
+
+#: The device's own statements, recognised before parsing: a protocol that is
+#: off or unknown has no neighbors, and the closing count must match what the
+#: engine returned (output cut short or an engine dropping a record fails).
+_PROTOCOL_OFF = re.compile(
+    r"^% (?:CDP|LLDP) is not enabled|^% Invalid input detected", re.MULTILINE
+)
+_CDP_TOTAL = re.compile(r"^\s*Total cdp entries displayed\s*:\s*(\d+)\s*$", re.MULTILINE)
+_LLDP_TOTAL = re.compile(r"^\s*Total entries displayed:\s*(\d+)\s*$", re.MULTILINE)
+
+#: CDP capability words, lowercased; multi-word ones joined with "-".
+_CDP_CAPABILITIES = {
+    "router",
+    "trans-bridge",
+    "source-route-bridge",
+    "switch",
+    "host",
+    "igmp",
+    "repeater",
+    "phone",
+    "remote",
+    "cvta",
+    "two-port-mac-relay",
+    "phone-port",
+}
+_CDP_PHRASES = {"two-port mac relay": "two-port-mac-relay", "phone port": "phone-port"}
+#: The legend IOS prints with `show lldp neighbors`.
+_LLDP_CAPABILITIES = {
+    "R": "router",
+    "B": "bridge",
+    "T": "telephone",
+    "C": "docsis-cable-device",
+    "W": "wlan-access-point",
+    "P": "repeater",
+    "S": "station",
+    "O": "other",
+}
+
+
+def neighbor_protocol_off(output: str) -> bool:
+    """True when the device says CDP/LLDP is disabled or the command is unknown."""
+    return _PROTOCOL_OFF.search(output) is not None
+
+
+def parse_show_cdp_neighbors_detail(output: str) -> list[IOSNeighbor]:
+    expected = _neighbor_total(SHOW_CDP_NEIGHBORS_DETAIL, _CDP_TOTAL, output)
+    if expected is None:
+        return []
+    result = parse_genie(GENIE_OS, SHOW_CDP_NEIGHBORS_DETAIL, output)
+    entries = [result["index"][i] for i in sorted(result.get("index", {}))]
+    _check_total(SHOW_CDP_NEIGHBORS_DETAIL, expected, len(entries))
+    neighbors = []
+    for entry in entries:
+        local = entry.get("local_interface")
+        if not local:
+            raise ParseError(f"{SHOW_CDP_NEIGHBORS_DETAIL!r}: a neighbor has no local interface")
+        neighbors.append(
+            _neighbor(
+                SHOW_CDP_NEIGHBORS_DETAIL,
+                protocol="cdp",
+                local_interface=full_interface_name(local),
+                remote_name=_text(entry.get("device_id")),
+                remote_port=_text(entry.get("port_id")),
+                remote_platform=_text(entry.get("platform")),
+                remote_description=_text(entry.get("software_version")),
+                management_addresses=_addresses(entry.get("management_addresses", {})),
+                entry_addresses=_addresses(entry.get("entry_addresses", {})),
+                capabilities=_cdp_capabilities(entry.get("capabilities", "")),
+                native_vlan=_text(entry.get("native_vlan")),
+                duplex=_duplex("CDP neighbor", entry.get("duplex_mode") or ""),
+            )
+        )
+    return neighbors
+
+
+def parse_show_lldp_neighbors_detail(output: str) -> list[IOSNeighbor]:
+    expected = _neighbor_total(SHOW_LLDP_NEIGHBORS_DETAIL, _LLDP_TOTAL, output)
+    if expected is None:
+        return []
+    rows = parse_textfsm(PLATFORM, SHOW_LLDP_NEIGHBORS_DETAIL, output)
+    _check_total(SHOW_LLDP_NEIGHBORS_DETAIL, expected, len(rows))
+    neighbors = []
+    for row in rows:
+        local = row["local_interface"]
+        if not local:
+            log.warning(
+                "LLDP neighbor %r: the device doesn't print its local interface",
+                row["neighbor_name"] or row["chassis_id"],
+            )
+        neighbors.append(
+            _neighbor(
+                SHOW_LLDP_NEIGHBORS_DETAIL,
+                protocol="lldp",
+                local_interface=full_interface_name(local) if local else None,
+                remote_name=_text(row["neighbor_name"]),
+                remote_port=_text(row["neighbor_port_id"]),
+                remote_port_description=_text(row["neighbor_interface"]),
+                remote_chassis_id=_text(row["chassis_id"]),
+                remote_description=_text(row["neighbor_description"]),
+                management_addresses=_addresses(
+                    [row["mgmt_address"]] if row["mgmt_address"] else []
+                ),
+                capabilities=_lldp_capabilities(row["capabilities"]),
+                native_vlan=_text(row["vlan_id"]),
+            )
+        )
+    return neighbors
+
+
+def _neighbor_total(command: str, total: re.Pattern[str], output: str) -> int | None:
+    """None when there is nothing to parse; otherwise the device's own count."""
+    if neighbor_protocol_off(output):
+        return None
+    match = total.search(output)
+    if match is None:
+        raise ParseError(f"{command!r} output has no closing entry count; cut short?")
+    return int(match.group(1)) or None
+
+
+def _check_total(command: str, expected: int, parsed: int) -> None:
+    if parsed != expected:
+        raise ParseError(f"{command!r}: the device lists {expected} neighbors, parsed {parsed}")
+
+
+def _neighbor(command: str, **fields: Any) -> IOSNeighbor:
+    try:
+        return IOSNeighbor(**fields)
+    except ValidationError as exc:
+        raise ParseError(f"unexpected {command!r} value: {exc}") from exc
+
+
+def _text(value: str | None) -> str | None:
+    return value.strip() or None if value else None
+
+
+def _addresses(values: Any) -> tuple[IPv4Address | IPv6Address, ...]:
+    try:
+        return tuple(ip_address(v) for v in values)
+    except ValueError as exc:
+        raise ParseError(f"unreadable neighbor address: {exc}") from exc
+
+
+def _cdp_capabilities(text: str) -> tuple[str, ...]:
+    words = text.strip().lower()
+    for phrase, name in _CDP_PHRASES.items():
+        words = words.replace(phrase, name)
+    names = tuple(words.split())
+    for name in names:
+        if name not in _CDP_CAPABILITIES:
+            log.warning("unrecognised CDP capability %r; kept as printed", name)
+    return names
+
+
+def _lldp_capabilities(text: str) -> tuple[str, ...]:
+    names = []
+    for code in (c.strip() for c in text.split(",") if c.strip()):
+        name = _LLDP_CAPABILITIES.get(code)
+        if name is None:
+            log.warning("unrecognised LLDP capability code %r; kept as printed", code)
+            name = code.lower()
+        names.append(name)
+    return tuple(names)

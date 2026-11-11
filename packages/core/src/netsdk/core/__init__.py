@@ -4,6 +4,7 @@ from netsdk.core.capabilities import (
     SupportsFacts,
     SupportsInterfaces,
     SupportsIPAddresses,
+    SupportsNeighbors,
     SupportsSwitchports,
     SupportsVLANs,
 )
@@ -20,7 +21,16 @@ from netsdk.core.exceptions import (
     ParseError,
 )
 from netsdk.core.formats import Duplex, MacAddress
-from netsdk.core.models import VLAN, Facts, Interface, IPAddress, NetSDKModel, Switchport
+from netsdk.core.models import (
+    VLAN,
+    Facts,
+    Interface,
+    IPAddress,
+    Neighbor,
+    NeighborProtocol,
+    NetSDKModel,
+    Switchport,
+)
 from netsdk.core.transports import Transport
 
 __version__ = "0.1.0"
@@ -39,6 +49,8 @@ __all__ = [
     "IPAddress",
     "Interface",
     "MacAddress",
+    "Neighbor",
+    "NeighborProtocol",
     "NetSDKError",
     "NetSDKModel",
     "NotSupportedError",
@@ -46,6 +58,7 @@ __all__ = [
     "SupportsFacts",
     "SupportsIPAddresses",
     "SupportsInterfaces",
+    "SupportsNeighbors",
     "SupportsSwitchports",
     "SupportsVLANs",
     "Switchport",

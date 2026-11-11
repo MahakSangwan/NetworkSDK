@@ -282,6 +282,30 @@ def test_get_switchports(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> 
 
 
 @needs_device
+def test_get_neighbors(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="netsdk"):
+        try:
+            neighbors = shared.get_neighbors()
+        except NotSupportedError:
+            pytest.skip("device has neither CDP nor LLDP")
+    by_protocol = {p: sum(n.protocol == p for n in neighbors) for p in ("cdp", "lldp")}
+    print(f"\n{len(neighbors)} neighbors: {by_protocol['cdp']} CDP, {by_protocol['lldp']} LLDP")
+    # No names, addresses, platforms or descriptions: this output gets pasted back.
+    print(f"{'proto':<5} {'local interface':<28} {'remote port':<28} {'name':<4} {'addr':<4} caps")
+    for n in neighbors:
+        print(
+            f"{n.protocol:<5} {n.local_interface or '-':<28} {n.remote_port or '-':<28} "
+            f"{'set' if n.remote_name else '-':<4} {len(n.management_addresses):<4} "
+            f"{','.join(n.capabilities) or '-'}"
+        )
+    for record in caplog.records:
+        print(f"{record.levelname}: {record.getMessage()}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted({n.local_interface for n in neighbors if n.local_interface} - interface_names)
+    assert not unknown, f"local interfaces that get_interfaces() doesn't list: {unknown}"
+
+
+@needs_device
 def test_get_vtp_status(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         try:
