@@ -15,7 +15,9 @@ Consumers, in order of arrival:
    their execution environment; we only state the Python minimum.
 
 Packages are internal only and not published. Live tests are manual, on a
-separate Windows machine with device access (git clone, venv, pip; no uv).
+separate RHEL 9 machine with device access (git clone, uv); until 2026-11-10
+that was a Windows machine using venv and pip. Development is in RHEL 9 under
+WSL2.
 
 ## Decisions
 

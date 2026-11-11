@@ -26,8 +26,9 @@ changing design.
 ## Workflow
 
 Work in small slices: agree the design, implement with unit tests on
-fixtures, then Mahak live-tests on a separate Windows machine (venv + pip, no
-uv) and reports back. Don't batch untested getters.
+fixtures, then Mahak live-tests on a separate RHEL 9 machine (uv, same
+commands as below) and reports back. Don't batch untested getters.
+Development happens in RHEL 9 under WSL2.
 
 ## SSH rule (D16)
 
@@ -50,5 +51,5 @@ Live tests (on the test machine, from the repo root, env vars documented in
 each `tests/live/` module):
 
 ```
-pytest -m live -s packages/cisco-ios/tests/live
+uv run pytest -m live -s packages/cisco-ios/tests/live
 ```
