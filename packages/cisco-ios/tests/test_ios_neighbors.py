@@ -30,21 +30,72 @@ CDP_TOTAL = "Total cdp entries displayed : {}"
 LLDP_TOTAL = "Total entries displayed: {}"
 
 
-def read(path: Path, total: str, marker: str) -> str:
-    """A sample as the device prints it: some upstream ones were trimmed
-    before the closing count line, which a device always prints."""
-    text = path.read_text()
-    if not re.search(r"^\s*Total .*entries displayed", text, re.MULTILINE):
-        text += "\n" + total.format(len(re.findall(marker, text, re.MULTILINE))) + "\n"
-    return text
-
-
 def cdp(path: Path) -> str:
-    return read(path, CDP_TOTAL, r"^Device ID:")
+    return path.read_text()
 
 
 def lldp(path: Path) -> str:
-    return read(path, LLDP_TOTAL, r"^Chassis id:")
+    return path.read_text()
+
+
+# Shaped like a live 2026-11-10 capture (values invented): two links to NX-OS
+# neighbors and no closing count line, which some IOS releases don't print.
+CDP_WITHOUT_COUNT = """\
+-------------------------
+Device ID: nx1(FDO00000001)
+Entry address(es):
+  IP address: 192.0.2.11
+Platform: N9K-C93108TC-FX3P,  Capabilities: Router Switch IGMP CVTA phone port
+Interface: GigabitEthernet1/0/24,  Port ID (outgoing port): Ethernet1/44
+Holdtime : 175 sec
+
+Version :
+Cisco Nexus Operating System (NX-OS) Software, Version 10.4(5)
+
+advertisement version: 2
+Native VLAN: 1
+Duplex: full
+Management address(es):
+  IP address: 192.0.2.11
+
+-------------------------
+Device ID: nx2(FDO00000002)
+Entry address(es):
+  IP address: 192.0.2.12
+Platform: N9K-C93108TC-FX3P,  Capabilities: Router Switch IGMP CVTA phone port
+Interface: GigabitEthernet1/0/23,  Port ID (outgoing port): Ethernet1/44
+Holdtime : 126 sec
+
+Version :
+Cisco Nexus Operating System (NX-OS) Software, Version 10.4(5)
+
+advertisement version: 2
+Native VLAN: 1
+Duplex: full
+Management address(es):
+  IP address: 192.0.2.12
+
+"""
+
+
+def test_cdp_without_closing_count() -> None:
+    neighbors = parse_show_cdp_neighbors_detail(CDP_WITHOUT_COUNT)
+    assert neighbors == [
+        IOSNeighbor(
+            protocol="cdp",
+            local_interface=f"GigabitEthernet1/0/{port}",
+            remote_name=f"nx{n}(FDO0000000{n})",
+            remote_port="Ethernet1/44",
+            remote_platform="N9K-C93108TC-FX3P",
+            remote_description="Cisco Nexus Operating System (NX-OS) Software, Version 10.4(5)",
+            management_addresses=(ip_address(f"192.0.2.1{n}"),),
+            entry_addresses=(ip_address(f"192.0.2.1{n}"),),
+            capabilities=("router", "switch", "igmp", "cvta", "phone-port"),
+            native_vlan=1,
+            duplex="full",
+        )
+        for n, port in ((1, 24), (2, 23))
+    ]
 
 
 # -- CDP (Genie) -------------------------------------------------------------
@@ -196,12 +247,13 @@ def test_no_neighbors_disabled_or_unknown_is_empty(
     name: str, parse: Callable[[str], list[IOSNeighbor]], total: str
 ) -> None:
     assert parse("\n" + total.format(0) + "\n") == []
+    assert parse("\n") == []  # running, no neighbors, no count line
     assert parse(f"% {name.upper()} is not enabled\n") == []
     assert parse("% Invalid input detected at '^' marker.\n") == []
 
 
 @pytest.mark.parametrize(("name", "parse", "total"), PARSERS, ids=[p[0] for p in PARSERS])
-def test_missing_or_wrong_count_is_a_parse_error(
+def test_wrong_count_is_a_parse_error(
     name: str, parse: Callable[[str], list[IOSNeighbor]], total: str
 ) -> None:
     sample = {
@@ -210,8 +262,7 @@ def test_missing_or_wrong_count_is_a_parse_error(
     }[name]
     text = sample.read_text()
     head = re.split(r"^\s*Total .*entries displayed.*$", text, flags=re.MULTILINE)[0]
-    with pytest.raises(ParseError, match="cut short"):
-        parse(head)
+    assert parse(head)  # no count line: fine
     with pytest.raises(ParseError, match="lists 9 neighbors"):
         parse(head + "\n" + total.format(9) + "\n")
 
@@ -265,6 +316,32 @@ def test_disabled_protocol_contributes_nothing(
     ).connection()
     with make_device(monkeypatch, tmp_path, conn) as device:
         assert [n.protocol for n in device.get_neighbors()] == ["lldp"]
+
+
+def test_paged_cdp_without_count_and_lldp_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The live case: the pager splits the second neighbor, LLDP is off.
+    text = CDP_WITHOUT_COUNT.replace("\n", "\r\n")
+    split = text.index("Holdtime : 126")
+    erase = "\b" * 9 + " " * 8 + "\b" * 9  # what IOS sends after " --More-- "
+    conn = FakeCLI(
+        {
+            "show cdp neighbors detail": [text[:split], text[split:]],
+            "show lldp neighbors detail": ["% LLDP is not enabled\r\n"],
+        },
+        hostname="BR-POE",
+        erase=erase,
+    ).connection()
+    with make_device(monkeypatch, tmp_path, conn) as device:
+        neighbors = device.get_neighbors()
+    assert neighbors == parse_show_cdp_neighbors_detail(CDP_WITHOUT_COUNT)
+    assert conn.writes == [
+        "show cdp neighbors detail\n",
+        " ",
+        "show lldp neighbors detail\n",
+        "exit\n",
+    ]
 
 
 def test_unknown_lldp_command_contributes_nothing(

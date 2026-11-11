@@ -361,8 +361,10 @@ def _allowed_vlans(name: str, value: str | None) -> tuple[bool, tuple[int, ...] 
 # -- neighbors: show cdp neighbors detail (Genie), show lldp ... (ntc, D35) ----
 
 #: The device's own statements, recognised before parsing: a protocol that is
-#: off or unknown has no neighbors, and the closing count must match what the
-#: engine returned (output cut short or an engine dropping a record fails).
+#: off or unknown has no neighbors. Some IOS releases end with a closing count
+#: ("Total cdp entries displayed : 2"), some don't (verified live 2026-11-10);
+#: when it is there it must match what the engine returned, so an engine
+#: dropping a record fails.
 _PROTOCOL_OFF = re.compile(
     r"^% (?:CDP|LLDP) is not enabled|^% Invalid input detected", re.MULTILINE
 )
@@ -404,12 +406,11 @@ def neighbor_protocol_off(output: str) -> bool:
 
 
 def parse_show_cdp_neighbors_detail(output: str) -> list[IOSNeighbor]:
-    expected = _neighbor_total(SHOW_CDP_NEIGHBORS_DETAIL, _CDP_TOTAL, output)
-    if expected is None:
+    if _no_neighbors(_CDP_TOTAL, output):
         return []
     result = parse_genie(GENIE_OS, SHOW_CDP_NEIGHBORS_DETAIL, output)
     entries = [result["index"][i] for i in sorted(result.get("index", {}))]
-    _check_total(SHOW_CDP_NEIGHBORS_DETAIL, expected, len(entries))
+    _check_total(SHOW_CDP_NEIGHBORS_DETAIL, _CDP_TOTAL, output, len(entries))
     neighbors = []
     for entry in entries:
         local = entry.get("local_interface")
@@ -435,11 +436,10 @@ def parse_show_cdp_neighbors_detail(output: str) -> list[IOSNeighbor]:
 
 
 def parse_show_lldp_neighbors_detail(output: str) -> list[IOSNeighbor]:
-    expected = _neighbor_total(SHOW_LLDP_NEIGHBORS_DETAIL, _LLDP_TOTAL, output)
-    if expected is None:
+    if _no_neighbors(_LLDP_TOTAL, output):
         return []
     rows = parse_textfsm(PLATFORM, SHOW_LLDP_NEIGHBORS_DETAIL, output)
-    _check_total(SHOW_LLDP_NEIGHBORS_DETAIL, expected, len(rows))
+    _check_total(SHOW_LLDP_NEIGHBORS_DETAIL, _LLDP_TOTAL, output, len(rows))
     neighbors = []
     for row in rows:
         local = row["local_interface"]
@@ -468,19 +468,20 @@ def parse_show_lldp_neighbors_detail(output: str) -> list[IOSNeighbor]:
     return neighbors
 
 
-def _neighbor_total(command: str, total: re.Pattern[str], output: str) -> int | None:
-    """None when there is nothing to parse; otherwise the device's own count."""
-    if neighbor_protocol_off(output):
-        return None
+def _no_neighbors(total: re.Pattern[str], output: str) -> bool:
+    """Protocol off or unknown, a count of 0, or no output at all."""
+    if neighbor_protocol_off(output) or not output.strip():
+        return True
     match = total.search(output)
-    if match is None:
-        raise ParseError(f"{command!r} output has no closing entry count; cut short?")
-    return int(match.group(1)) or None
+    return match is not None and int(match.group(1)) == 0
 
 
-def _check_total(command: str, expected: int, parsed: int) -> None:
-    if parsed != expected:
-        raise ParseError(f"{command!r}: the device lists {expected} neighbors, parsed {parsed}")
+def _check_total(command: str, total: re.Pattern[str], output: str, parsed: int) -> None:
+    match = total.search(output)
+    if match is not None and int(match.group(1)) != parsed:
+        raise ParseError(
+            f"{command!r}: the device lists {match.group(1)} neighbors, parsed {parsed}"
+        )
 
 
 def _neighbor(command: str, **fields: Any) -> IOSNeighbor:

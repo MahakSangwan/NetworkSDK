@@ -6,6 +6,5 @@ Copied unchanged from ntc-templates
 `77768366e7f5833275bdb45c31156bd3e1777378`), under the Apache License 2.0 in
 [LICENSE](LICENSE). Parsed with ntc-templates (D35).
 
-Some samples were trimmed upstream before the closing
-"Total ... entries displayed" line a device always prints; the tests add it
-back.
+Some end with a "Total ... entries displayed" line and some don't, as on
+real devices (some IOS releases don't print it).

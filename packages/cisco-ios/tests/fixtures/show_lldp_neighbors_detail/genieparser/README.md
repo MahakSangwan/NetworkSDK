@@ -7,7 +7,6 @@ Copied unchanged from genieparser
 `src/genie/libs/parser/<os>/tests/ShowLldpNeighborsDetail/cli/equal/<name>_output.txt`.
 Parsed with ntc-templates (D35).
 
-Some samples were trimmed upstream before the closing
-"Total ... entries displayed" line a device always prints; the tests add it
-back. The expected values in `test_ios_neighbors.py` are ours, read off these
+Some end with a "Total ... entries displayed" line and some don't, as on
+real devices (some IOS releases don't print it). The expected values in `test_ios_neighbors.py` are ours, read off these
 files, not genieparser's expected results.
