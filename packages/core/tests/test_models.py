@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from netsdk.core import Facts, NotSupportedError, ParseError, SupportsFacts
-from netsdk.core.parsing import parse_textfsm
+from netsdk.core.parsing import parse_genie, parse_textfsm
 
 FACTS = {
     "hostname": "r1",
@@ -60,4 +60,29 @@ def test_unrecognised_output_is_a_parse_error_not_empty_data() -> None:
 def test_command_without_template_is_a_parse_error() -> None:
     with pytest.raises(ParseError) as excinfo:
         parse_textfsm("cisco_ios", "show netsdk-no-such-command", "x\n")
+    assert not isinstance(excinfo.value, NotSupportedError)
+
+
+# -- parse_genie -----------------------------------------------------------
+
+GENIE_CLOCK = "*12:34:56.789 UTC Mon Nov 9 2026\n"
+
+
+def test_parse_genie_returns_plain_dicts() -> None:
+    result = parse_genie("ios", "show clock", GENIE_CLOCK)
+    assert type(result) is dict
+    assert result["year"] == "2026"
+
+
+@pytest.mark.parametrize(
+    ("command", "output"),
+    [
+        pytest.param("show clock", "% Invalid input detected\n", id="unrecognised"),
+        pytest.param("show clock", "", id="empty"),
+        pytest.param("show netsdk-no-such-command", "x\n", id="no-parser"),
+    ],
+)
+def test_parse_genie_failures_are_parse_errors(command: str, output: str) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse_genie("ios", command, output)
     assert not isinstance(excinfo.value, NotSupportedError)

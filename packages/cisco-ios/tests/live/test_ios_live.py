@@ -239,6 +239,49 @@ def test_get_vlans(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
 
 
 @needs_device
+def test_get_vtp_status(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        try:
+            vtp = shared.get_vtp_status()
+        except NotSupportedError:
+            pytest.skip("device has no VTP (router?)")
+    # No domain, IDs, addresses or descriptions: this output gets pasted back.
+    print(f"\nversion {vtp.version} (max {vtp.max_version or '-'}), mode {vtp.mode}")
+    print(f"revision {vtp.configuration_revision}, pruning {vtp.pruning_enabled}")
+    print(
+        f"VLANs {vtp.vlan_count} (extended {vtp.extended_vlan_count}, max {vtp.max_vlans}), "
+        f"traps {vtp.traps_enabled}"
+    )
+    is_set = {
+        name: "set" if getattr(vtp, name) is not None else "-"
+        for name in (
+            "domain_name",
+            "device_id",
+            "primary_id",
+            "primary_description",
+            "last_modified_by",
+            "last_modified_at",
+            "updater_id",
+            "updater_interface",
+        )
+    }
+    print(", ".join(f"{name} {value}" for name, value in is_set.items()))
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    # Reported, not asserted: whether VTP counts every VLAN `show vlan brief`
+    # lists (1002-1005, extended range) may differ by platform.
+    try:
+        listed = len(shared.get_vlans())
+    except NotSupportedError:
+        listed = None
+    counted = vtp.vlan_count + (vtp.extended_vlan_count or 0)
+    print(f"VLAN count: VTP {counted}, get_vlans() {listed}")
+    if vtp.updater_interface:
+        interface_names = {i.name for i in shared.get_interfaces()}
+        assert vtp.updater_interface in interface_names, "updater interface not in get_interfaces()"
+
+
+@needs_device
 def test_shared_session_log_is_complete_and_clean(shared: CiscoIOS) -> None:
     # Last shared test: logs out, then checks the whole session's log.
     shared.close()

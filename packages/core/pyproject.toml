@@ -16,6 +16,11 @@ dependencies = [
 # updates only land when we raise the range and the fixtures still pass.
 ssh = ["netmiko>=4.5", "ntc-templates>=9.3,<10"]
 rest = ["httpx>=0.28"]
+# Genie: Cisco's parsers, used per command where ntc-templates falls short
+# (D32). genie needs pyats at runtime without declaring it. Pinned like
+# ntc-templates; on Python 3.14 one dependency (ruamel.yaml.clib) builds from
+# source, so the machine needs gcc and make.
+genie = ["genie>=26.10,<27", "pyats>=26.10,<27"]
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14.0"]

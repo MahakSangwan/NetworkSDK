@@ -1,8 +1,9 @@
 """Turn IOS command output into models.
 
-Parsing is done by ntc-templates (D27); this layer maps template records into
-our models, enforces the fields a model can't do without and rejects what we
-don't support. Raised errors carry no host; the device adds it.
+Parsing is done by ntc-templates (D27), or by Genie for the commands D32
+lists; this layer maps their results into our models, enforces the fields a
+model can't do without and rejects what we don't support; no whole-command
+parsing happens here. Raised errors carry no host; the device adds it.
 """
 
 import logging
@@ -11,21 +12,25 @@ from datetime import timedelta
 from ipaddress import ip_address
 from typing import Any
 
+from pydantic import ValidationError
+
 from netsdk.cisco.ios.commands import (
     SHOW_INTERFACES,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSVTPStatus
 from netsdk.cisco.ios.names import full_interface_name
 from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
-from netsdk.core.parsing import parse_textfsm
+from netsdk.core.parsing import parse_genie, parse_textfsm
 
 log = logging.getLogger(__name__)
 
 PLATFORM = "cisco_ios"
+GENIE_OS = "ios"
 VENDOR = "Cisco"
 
 _UPTIME_UNITS = {
@@ -207,3 +212,68 @@ def parse_show_vlan_brief(output: str) -> list[IOSVLAN]:
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
         raise ParseError(f"{SHOW_VLAN_BRIEF!r} lists VLAN {duplicates} more than once")
     return vlans
+
+
+# -- show vtp status (Genie, D32) --------------------------------------------
+
+#: Printed for "nothing" in place of an address, a time or a domain name.
+_NO_ADDRESS = "0.0.0.0"
+_NO_TIME = "0-0-00 00:00:00"
+_NO_DOMAIN = "<>"
+
+
+def parse_show_vtp_status(output: str) -> IOSVTPStatus:
+    vtp = parse_genie(GENIE_OS, SHOW_VTP_STATUS, output).get("vtp")
+    if not isinstance(vtp, dict):
+        raise ParseError(f"{SHOW_VTP_STATUS!r}: Genie returned no 'vtp' section")
+    # VTP v3 nests the VLAN database under "feature"; v1/v2 print it flat.
+    vlan = vtp.get("feature", {}).get("vlan", vtp)
+    missing = [
+        key
+        for section, key in [
+            (vtp, "version"),
+            (vtp, "pruning_mode"),
+            (vtp, "traps_generation"),
+            (vlan, "operating_mode"),
+            (vlan, "configuration_revision"),
+            (vlan, "existing_vlans"),
+        ]
+        if key not in section
+    ]
+    if missing:
+        raise ParseError(f"{SHOW_VTP_STATUS!r} output has no {', '.join(missing)}")
+
+    # Genie prints "1 to 3" as [1, 2, 3] but "VTP2 capable" as ["2"].
+    capable = [int(v) for v in vtp.get("version_capable", [])]
+    domain = vtp.get("domain_name") or None
+    interface = vtp.get("updater_interface")
+    try:
+        return IOSVTPStatus(
+            version=int(vtp["version"]),
+            max_version=max(capable) if capable else None,
+            domain_name=None if domain == _NO_DOMAIN else domain,
+            mode=vlan["operating_mode"],
+            configuration_revision=vlan["configuration_revision"],
+            vlan_count=vlan["existing_vlans"],
+            extended_vlan_count=vlan.get("existing_extended_vlans"),
+            max_vlans=vlan.get("maximum_vlans"),
+            pruning_enabled=vtp["pruning_mode"],
+            traps_enabled=vtp["traps_generation"],
+            device_id=vtp.get("device_id"),
+            primary_id=vlan.get("primary_id"),
+            primary_description=vlan.get("primary_description") or None,
+            last_modified_by=_address(vtp.get("conf_last_modified_by")),
+            last_modified_at=(
+                None
+                if vtp.get("conf_last_modified_time") in (None, _NO_TIME)
+                else vtp["conf_last_modified_time"]
+            ),
+            updater_id=_address(vtp.get("updater_id")),
+            updater_interface=full_interface_name(interface) if interface else None,
+        )
+    except ValidationError as exc:
+        raise ParseError(f"unexpected {SHOW_VTP_STATUS!r} value: {exc}") from exc
+
+
+def _address(value: str | None) -> str | None:
+    return None if value in (None, _NO_ADDRESS) else value

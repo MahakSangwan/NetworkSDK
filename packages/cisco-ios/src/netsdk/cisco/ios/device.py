@@ -11,13 +11,15 @@ from netsdk.cisco.ios.commands import (
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSVTPStatus
 from netsdk.cisco.ios.parsers import (
     parse_show_interfaces,
     parse_show_ip_interface,
     parse_show_version,
     parse_show_vlan_brief,
+    parse_show_vtp_status,
 )
 from netsdk.cisco.ios.transport import IOSSSHTransport
 from netsdk.core import (
@@ -156,13 +158,28 @@ class CiscoIOS(Device):
             return parse_show_vlan_brief(raw[SHOW_VLAN_BRIEF])
 
     def get_vlans_raw(self) -> dict[str, str]:
+        return {SHOW_VLAN_BRIEF: self._send_if_supported(SHOW_VLAN_BRIEF, "no VLAN support")}
+
+    def get_vtp_status(self) -> IOSVTPStatus:
+        """VTP version, domain, mode and revision of the VLAN database.
+
+        Raises NotSupportedError on a device without VTP (e.g. a router).
+        """
+        raw = self.get_vtp_status_raw()
+        with self._attributed():
+            return parse_show_vtp_status(raw[SHOW_VTP_STATUS])
+
+    def get_vtp_status_raw(self) -> dict[str, str]:
+        return {SHOW_VTP_STATUS: self._send_if_supported(SHOW_VTP_STATUS, "no VTP support")}
+
+    def _send_if_supported(self, command: str, reason: str) -> str:
         try:
-            return {SHOW_VLAN_BRIEF: self.send_command(SHOW_VLAN_BRIEF)}
+            return self.send_command(command)
         except CommandError as exc:
             # Only "% Invalid input": an authorization failure stays an error.
             if exc.output and "% Invalid input" in exc.output:
                 raise NotSupportedError(
-                    f"{SHOW_VLAN_BRIEF!r} is not available: no VLAN support", host=self.host
+                    f"{command!r} is not available: {reason}", host=self.host
                 ) from exc
             raise
 

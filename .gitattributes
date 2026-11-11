@@ -1,3 +1,5 @@
-# Raw terminal captures must stay byte-exact (, backspaces); never convert
+# Raw terminal captures must stay byte-exact (CR, backspaces); never convert
 # their line endings.
 *.raw -text
+# Upstream fixture samples, kept byte-exact (trailing spaces included).
+packages/*/tests/fixtures/**/*.txt -text
