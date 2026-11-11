@@ -33,7 +33,7 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 # Ship no type information.
-module = ["ntc_templates.*", "genie.*", "pyats.*"]
+module = ["ntc_templates.*", "textfsm.*", "genie.*", "pyats.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

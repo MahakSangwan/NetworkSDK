@@ -11,6 +11,7 @@ from netsdk.cisco.ios.commands import (
     SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACES,
     SHOW_INTERFACES_SWITCHPORT,
+    SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
@@ -30,6 +31,7 @@ from netsdk.cisco.ios.parsers import (
     parse_show_cdp_neighbors_detail,
     parse_show_interfaces,
     parse_show_interfaces_switchport,
+    parse_show_inventory,
     parse_show_ip_interface,
     parse_show_lldp_neighbors_detail,
     parse_show_version,
@@ -42,6 +44,7 @@ from netsdk.core import (
     Credentials,
     Device,
     DeviceConnectionError,
+    InventoryItem,
     IPAddress,
     NetSDKError,
     NotSupportedError,
@@ -194,6 +197,15 @@ class CiscoIOS(Device):
                 SHOW_INTERFACES_SWITCHPORT, "no switch ports"
             )
         }
+
+    def get_inventory(self) -> list[InventoryItem]:
+        """Chassis, modules, power supplies, fans and transceivers, in device order."""
+        raw = self.get_inventory_raw()
+        with self._attributed():
+            return parse_show_inventory(raw[SHOW_INVENTORY])
+
+    def get_inventory_raw(self) -> dict[str, str]:
+        return {SHOW_INVENTORY: self.send_command(SHOW_INVENTORY)}
 
     def get_neighbors(self) -> list[IOSNeighbor]:
         """CDP neighbors, then LLDP neighbors, each tagged with its protocol.

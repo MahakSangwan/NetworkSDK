@@ -6,26 +6,39 @@ CLI output is parsed with Cisco's Genie by default, or with ntc-templates
 works without them.
 """
 
+from pathlib import Path
 from typing import Any
 
 from netsdk.core.exceptions import ParseError
 
 
-def parse_textfsm(platform: str, command: str, output: str) -> list[dict[str, Any]]:
+def parse_textfsm(
+    platform: str, command: str, output: str, *, template: Path | None = None
+) -> list[dict[str, Any]]:
     """Parse `output` of `command` with the ntc-templates template for `platform`.
 
-    Returns one dict per TextFSM record, keys lowercased. Raises ParseError
-    when there is no template or the output matches nothing: TextFSM itself
-    returns an empty list for output it doesn't recognise, which must never
-    pass as "no data".
+    `template` replaces ntc-templates' own file with a corrected copy while an
+    upstream fix is unreleased (D36). Returns one dict per TextFSM record,
+    keys lowercased. Raises ParseError when there is no template or the
+    output matches nothing: TextFSM itself returns an empty list for output
+    it doesn't recognise, which must never pass as "no data".
     """
     try:
+        import textfsm
         from ntc_templates.parse import parse_output
     except ImportError as exc:
         raise ImportError("parse_textfsm() needs ntc-templates: install netsdk-core[ssh]") from exc
 
     try:
-        rows: list[dict[str, Any]] = parse_output(platform=platform, command=command, data=output)
+        if template is None:
+            rows: list[dict[str, Any]] = parse_output(
+                platform=platform, command=command, data=output
+            )
+        else:
+            with template.open(encoding="utf-8") as fh:
+                fsm = textfsm.TextFSM(fh)
+            header = [name.lower() for name in fsm.header]
+            rows = [dict(zip(header, row, strict=True)) for row in fsm.ParseText(output)]
     except Exception as exc:  # no template, or the template hit an Error state
         raise ParseError(f"could not parse {command!r} output: {exc}") from exc
     if not rows:

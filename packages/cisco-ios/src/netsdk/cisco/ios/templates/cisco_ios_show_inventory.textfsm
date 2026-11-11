@@ -1,0 +1,23 @@
+# netsdk copy of ntc-templates' cisco_ios_show_inventory.textfsm (Apache-2.0),
+# upstream master b663a8a4e8ac29e3fb1186e1c60ee20c91ec7c71 plus the fix in
+# https://github.com/networktocode/ntc-templates/pull/2377 (SN and PID were
+# truncated). Delete this file once a released ntc-templates has the fix (D36).
+Value NAME (.*)
+Value DESCR (.*)
+Value PID ((?:[^,]*[^,\s])?)
+Value VID (\S*)
+Value SN (\S+)
+
+Start
+  ^NAME:\s+"${NAME}",\s+DESCR:\s+"${DESCR}"
+  ^PID:\s+${PID}.*,.*VID:\s+${VID}\s*,.*SN:\s+${SN} -> Record
+  ^PID:\s+,.*VID:\s+${VID}\s*,.*SN: -> Record
+  ^PID:\s+${PID}.*,.*VID:\s+${VID}\s*,.*SN: -> Record
+  ^PID:\s+,.*VID:\s+${VID}\s*,.*SN:\s+${SN} -> Record
+  ^PID:\s+${PID}.*,.*VID:\s+${VID}.*
+  ^PID:\s+,.*VID:\s+${VID}.*
+  ^.*SN:\s+${SN} -> Record
+  ^.*SN: -> Record
+  # Capture time-stamp if vty line has command time-stamping turned on
+  ^Load\s+for\s+
+  ^Time\s+source\s+is

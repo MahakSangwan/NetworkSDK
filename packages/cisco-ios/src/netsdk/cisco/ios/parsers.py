@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address
+from pathlib import Path
 from typing import Any, Literal
 
 from netutils.vlan import vlanconfig_to_list
@@ -19,6 +20,7 @@ from netsdk.cisco.ios.commands import (
     SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACES,
     SHOW_INTERFACES_SWITCHPORT,
+    SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
@@ -34,7 +36,7 @@ from netsdk.cisco.ios.models import (
     IOSVTPStatus,
 )
 from netsdk.cisco.ios.names import full_interface_name
-from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
+from netsdk.core import Duplex, InventoryItem, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import parse_genie, parse_textfsm
 
@@ -522,3 +524,26 @@ def _lldp_capabilities(text: str) -> tuple[str, ...]:
             name = code.lower()
         names.append(name)
     return tuple(names)
+
+
+# -- show inventory (ntc-templates with a corrected template, D36) ------------
+
+#: Released ntc-templates truncates serials at "-" and PIDs at a space;
+#: delete with the file once a release has networktocode/ntc-templates#2377.
+_INVENTORY_TEMPLATE = Path(__file__).parent / "templates" / "cisco_ios_show_inventory.textfsm"
+
+
+def parse_show_inventory(output: str) -> list[InventoryItem]:
+    rows = parse_textfsm(PLATFORM, SHOW_INVENTORY, output, template=_INVENTORY_TEMPLATE)
+    items = []
+    for row in rows:
+        items.append(
+            InventoryItem(
+                name=_text(row["name"]),
+                description=_text(row["descr"]),
+                part_id=_text(row["pid"]),
+                version_id=_text(row["vid"]),
+                serial_number=_text(row["sn"]),
+            )
+        )
+    return items

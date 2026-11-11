@@ -20,6 +20,7 @@ with CiscoIOS("10.0.0.1", creds) as device:
 | `get_ip_addresses()` | `show ip interface` | One record per address, with VRF. IPv4 only for now; unnumbered interfaces have none. |
 | `get_vlans()` | `show vlan brief` | Access ports only; trunk VLANs are in `get_switchports()`. `NotSupportedError` on devices without VLANs. |
 | `get_switchports()` | `show interfaces switchport` | Layer-2 ports only: mode, access/native/voice VLAN, allowed VLANs (`ALL` is a flag). Order is not the device's. |
+| `get_inventory()` | `show inventory` | Every item in device order: name, description, part ID, version ID, serial. |
 | `get_neighbors()` | `show cdp neighbors detail`, `show lldp neighbors detail` | One record per neighbor per port per protocol; remote values as advertised. A disabled protocol adds nothing. |
 | `get_vtp_status()` | `show vtp status` | VTP v1-v3, VLAN feature only; no MD5 digest. `NotSupportedError` on devices without VTP. |
 

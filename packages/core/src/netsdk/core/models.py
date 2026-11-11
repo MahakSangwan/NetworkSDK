@@ -143,3 +143,20 @@ class Neighbor(NetSDKModel):
     #: Lowercase names: CDP's words ("router", "switch", "igmp") or LLDP's
     #: codes expanded ("bridge", "router", "telephone", ...).
     capabilities: tuple[str, ...] = ()
+
+
+class InventoryItem(NetSDKModel):
+    """One hardware item: chassis, module, power supply, fan, transceiver, ...
+
+    Values as the device reports them. Names can repeat (identical modules
+    some platforms list under one name); every item is kept, in device order.
+    """
+
+    #: None when printed empty (a 7206VXR prints `NAME: ""` for its chassis).
+    name: str | None
+    description: str | None = None
+    #: Product ID, e.g. "WS-C3850-24T", "SFP-10G-SR" (NetBox: part_id).
+    part_id: str | None = None
+    #: Version ID, e.g. "V02".
+    version_id: str | None = None
+    serial_number: str | None = None

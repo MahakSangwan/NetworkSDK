@@ -306,6 +306,24 @@ def test_get_neighbors(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> No
 
 
 @needs_device
+def test_get_inventory(shared: CiscoIOS) -> None:
+    items = shared.get_inventory()
+    # No serial numbers: this output gets pasted back for review.
+    print(f"\n{len(items)} inventory items")
+    print(f"{'name':<34} {'part id':<24} {'vid':<6} {'sn':<3} description")
+    for i in items:
+        print(
+            f"{i.name or '-':<34} {i.part_id or '-':<24} {i.version_id or '-':<6} "
+            f"{'set' if i.serial_number else '-':<3} {i.description or '-'}"
+        )
+    # Reported, not asserted: whether the chassis serial from `show version`
+    # is one of the inventory serials.
+    serial = shared.get_facts().serial_number
+    print(f"show version serial in inventory: {serial in {i.serial_number for i in items}}")
+    assert items
+
+
+@needs_device
 def test_get_vtp_status(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         try:
