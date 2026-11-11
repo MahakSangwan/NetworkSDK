@@ -1,27 +1,29 @@
 """Turn IOS command output into models.
 
-Parsing is done by ntc-templates (D27), or by Genie for the commands D32
-lists; this layer maps their results into our models, enforces the fields a
-model can't do without and rejects what we don't support; no whole-command
-parsing happens here. Raised errors carry no host; the device adds it.
+Parsing is done by Genie or ntc-templates, per command as D33 lists. This
+layer maps their results into our models, enforces the fields a model can't
+do without and rejects what we don't support; no whole-command parsing
+happens here. Raised errors carry no host; the device adds it.
 """
 
 import logging
 import re
 from datetime import timedelta
 from ipaddress import ip_address
-from typing import Any
+from typing import Any, Literal
 
+from netutils.vlan import vlanconfig_to_list
 from pydantic import ValidationError
 
 from netsdk.cisco.ios.commands import (
     SHOW_INTERFACES,
+    SHOW_INTERFACES_SWITCHPORT,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSVTPStatus
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSSwitchport, IOSVTPStatus
 from netsdk.cisco.ios.names import full_interface_name
 from netsdk.core import Duplex, IPAddress, NotSupportedError, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
@@ -214,7 +216,7 @@ def parse_show_vlan_brief(output: str) -> list[IOSVLAN]:
     return vlans
 
 
-# -- show vtp status (Genie, D32) --------------------------------------------
+# -- show vtp status (Genie, D32, D33) ---------------------------------------
 
 #: Printed for "nothing" in place of an address, a time or a domain name.
 _NO_ADDRESS = "0.0.0.0"
@@ -277,3 +279,71 @@ def parse_show_vtp_status(output: str) -> IOSVTPStatus:
 
 def _address(value: str | None) -> str | None:
     return None if value in (None, _NO_ADDRESS) else value
+
+
+# -- show interfaces switchport (Genie, D33) ---------------------------------
+
+#: Operational modes that map to the core `mode`; anything else is None.
+_SWITCHPORT_MODES: dict[str, Literal["access", "trunk"]] = {
+    "static access": "access",
+    "access": "access",
+    "trunk": "trunk",
+}
+
+
+def parse_show_interfaces_switchport(output: str) -> list[IOSSwitchport]:
+    ports = []
+    for name, port in parse_genie(GENIE_OS, SHOW_INTERFACES_SWITCHPORT, output).items():
+        if not port.get("switchport_enable"):
+            continue  # routed port
+        if "switchport_mode" not in port:
+            raise ParseError(f"{SHOW_INTERFACES_SWITCHPORT!r}: {name} has no administrative mode")
+        oper = port.get("operational_mode")
+        encapsulation = port.get("encapsulation", {})
+        all_allowed, allowed = _allowed_vlans(name, port.get("trunk_vlans"))
+        try:
+            ports.append(
+                IOSSwitchport(
+                    # Genie expands names itself; full names come back unchanged.
+                    interface=full_interface_name(name),
+                    mode=_SWITCHPORT_MODES.get(oper) if oper else None,
+                    access_vlan=_vlan(port.get("access_vlan")),
+                    native_vlan=_vlan(encapsulation.get("native_vlan")),
+                    all_vlans_allowed=all_allowed,
+                    allowed_vlans=allowed,
+                    admin_mode=port["switchport_mode"],
+                    oper_mode=oper,
+                    voice_vlan=_vlan(port.get("voice_vlan")),
+                    negotiation=port.get("negotiation_of_trunk"),
+                    encapsulation=encapsulation.get("operational_encapsulation"),
+                )
+            )
+        except (ValidationError, ValueError) as exc:
+            raise ParseError(
+                f"unexpected {SHOW_INTERFACES_SWITCHPORT!r} value for {name}: {exc}"
+            ) from exc
+    return ports
+
+
+def _vlan(value: str | None) -> int | None:
+    # No VLAN: "none" (voice), "unassigned" (access), and "0 (Inactive)",
+    # printed as the native VLAN of a port-channel that is down.
+    if value is None or value.lower() in ("none", "unassigned", "0"):
+        return None
+    return int(value)
+
+
+def _allowed_vlans(name: str, value: str | None) -> tuple[bool, tuple[int, ...] | None]:
+    if value is None:
+        return False, None
+    text = value.strip().lower()
+    if text == "all":
+        return True, None
+    if text == "none":
+        return False, ()
+    try:
+        return False, tuple(sorted(set(vlanconfig_to_list(text))))
+    except ValueError as exc:
+        raise ParseError(
+            f"{SHOW_INTERFACES_SWITCHPORT!r}: unreadable allowed VLANs {value!r} on {name}"
+        ) from exc

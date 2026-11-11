@@ -239,6 +239,49 @@ def test_get_vlans(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
 
 
 @needs_device
+def test_get_switchports(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        try:
+            ports = shared.get_switchports()
+        except NotSupportedError:
+            pytest.skip("device has no switch ports (router?)")
+    print(f"\n{len(ports)} switchports")
+    print(
+        f"{'interface':<28} {'mode':<6} {'admin mode':<18} {'oper mode':<14} "
+        f"{'access':>6} {'native':>6} {'voice':>5} {'allowed'}"
+    )
+    for p in sorted(ports, key=lambda p: p.interface):
+        if p.all_vlans_allowed:
+            allowed = "ALL"
+        elif p.allowed_vlans is None:
+            allowed = "-"
+        else:
+            allowed = f"{len(p.allowed_vlans)} VLANs"
+        print(
+            f"{p.interface:<28} {p.mode or '-':<6} {p.admin_mode:<18} {p.oper_mode or '-':<14} "
+            f"{p.access_vlan or '-':>6} {p.native_vlan or '-':>6} {p.voice_vlan or '-':>5} "
+            f"{allowed}"
+        )
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted({p.interface for p in ports} - interface_names)
+    assert not unknown, f"switchports that get_interfaces() doesn't list: {unknown}"
+    # Reported, not asserted: access ports `show vlan brief` puts in another
+    # VLAN than their access VLAN (or leaves out).
+    try:
+        vlan_of = {name: v.vlan_id for v in shared.get_vlans() for name in v.interfaces}
+    except NotSupportedError:
+        return
+    differ = [
+        f"{p.interface} (access {p.access_vlan}, get_vlans {vlan_of.get(p.interface)})"
+        for p in ports
+        if p.mode == "access" and vlan_of.get(p.interface) != p.access_vlan
+    ]
+    print(f"access ports whose VLAN differs from get_vlans(): {differ or 'none'}")
+
+
+@needs_device
 def test_get_vtp_status(shared: CiscoIOS, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         try:

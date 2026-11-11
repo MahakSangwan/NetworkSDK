@@ -1,8 +1,9 @@
 """Helpers for the parsers layer of CLI device packages.
 
-CLI output is parsed with ntc-templates (TextFSM) by default (D27), or with
-Cisco's Genie where the decision log says so for a command (D32). Each engine
-needs its extra (`ssh`, `genie`); importing this module works without them.
+CLI output is parsed with Cisco's Genie by default, or with ntc-templates
+(TextFSM) where Genie falls short; the decision log lists which per command
+(D33). Each engine needs its extra (`genie`, `ssh`); importing this module
+works without them.
 """
 
 from typing import Any

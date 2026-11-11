@@ -117,6 +117,20 @@ def test_abbreviations_expand_back_to_full_names() -> None:
     ] == []
 
 
+@pytest.mark.parametrize(
+    ("short", "full"),
+    [
+        # netutils spells these differently or not at all; IOS-XE prints the right side.
+        ("Hu1/0/49", "HundredGigE1/0/49"),
+        ("Wl0/1/4", "Wlan-GigabitEthernet0/1/4"),
+        ("Vl10", "Vlan10"),
+    ],
+)
+def test_ios_spellings(short: str, full: str) -> None:
+    assert full_interface_name(short) == full
+    assert full_interface_name(full) == full
+
+
 def test_unknown_prefix_is_logged_and_kept(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         assert full_interface_name("Xyz1/0/1") == "Xyz1/0/1"

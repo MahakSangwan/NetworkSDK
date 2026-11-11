@@ -11,8 +11,18 @@ from netutils.interface import canonical_interface_name
 
 log = logging.getLogger(__name__)
 
-#: Where IOS spells a full name differently from netutils' canonical one.
-_IOS_NAMES = {"Vl": "Vlan", "Vlan": "Vlan", "VLAN": "Vlan"}
+#: Where IOS spells a full name differently from netutils' canonical one
+#: (netutils: "VLAN", "HundredGigabitEthernet"; it doesn't know "Wl", the
+#: embedded access point port on ISRs).
+_IOS_NAMES = {
+    "Vl": "Vlan",
+    "Vlan": "Vlan",
+    "VLAN": "Vlan",
+    "Hu": "HundredGigE",
+    "HundredGigE": "HundredGigE",
+    "Wl": "Wlan-GigabitEthernet",
+    "Wlan-GigabitEthernet": "Wlan-GigabitEthernet",
+}
 
 
 def full_interface_name(name: str) -> str:

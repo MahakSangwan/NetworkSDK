@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 
-from netsdk.core import Facts, NotSupportedError, ParseError, SupportsFacts
+from netsdk.core import Facts, NotSupportedError, ParseError, SupportsFacts, Switchport
 from netsdk.core.parsing import parse_genie, parse_textfsm
 
 FACTS = {
@@ -86,3 +86,28 @@ def test_parse_genie_failures_are_parse_errors(command: str, output: str) -> Non
     with pytest.raises(ParseError) as excinfo:
         parse_genie("ios", command, output)
     assert not isinstance(excinfo.value, NotSupportedError)
+
+
+# -- Switchport ------------------------------------------------------------
+
+
+def test_switchport_allowed_vlans_states() -> None:
+    assert Switchport(interface="Gi1", mode="trunk", all_vlans_allowed=True).allowed_vlans is None
+    assert Switchport(interface="Gi1", mode="trunk", allowed_vlans=()).allowed_vlans == ()
+    assert Switchport(interface="Gi1", mode=None).allowed_vlans is None  # not printed
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param({"all_vlans_allowed": True, "allowed_vlans": (10,)}, id="all-and-list"),
+        pytest.param({"allowed_vlans": (20, 10)}, id="unsorted"),
+        pytest.param({"allowed_vlans": (10, 10)}, id="duplicate"),
+        pytest.param({"allowed_vlans": (0,)}, id="vlan-0"),
+        pytest.param({"allowed_vlans": (4095,)}, id="vlan-4095"),
+        pytest.param({"access_vlan": 0}, id="access-0"),
+    ],
+)
+def test_switchport_rejects(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Switchport(interface="Gi1", mode="trunk", **fields)

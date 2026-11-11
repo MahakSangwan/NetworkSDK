@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "netsdk-core[ssh,genie]>=0.1,<0.2",
-    # Parser engines (D27, D32), declared even though netsdk-core brings them.
+    # Parser engines (D33), declared even though netsdk-core brings them.
     # Genie is a hard dependency: a getter that works only with an extra
     # installed would surprise users.
     "ntc-templates>=9.3,<10",

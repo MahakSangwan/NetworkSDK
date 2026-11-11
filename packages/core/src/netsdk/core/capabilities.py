@@ -8,7 +8,7 @@ the unparsed output keyed by the command or endpoint it came from.
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
-from netsdk.core.models import VLAN, Facts, Interface, IPAddress
+from netsdk.core.models import VLAN, Facts, Interface, IPAddress, Switchport
 
 
 @runtime_checkable
@@ -37,3 +37,10 @@ class SupportsVLANs(Protocol):
     def get_vlans(self) -> Sequence[VLAN]: ...
 
     def get_vlans_raw(self) -> dict[str, str]: ...
+
+
+@runtime_checkable
+class SupportsSwitchports(Protocol):
+    def get_switchports(self) -> Sequence[Switchport]: ...
+
+    def get_switchports_raw(self) -> dict[str, str]: ...

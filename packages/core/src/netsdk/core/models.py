@@ -7,8 +7,9 @@ a snapshot, not something to edit.
 
 from datetime import timedelta
 from ipaddress import IPv4Interface, IPv6Interface
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from netsdk.core.formats import Duplex, MacAddress
 
@@ -78,3 +79,34 @@ class VLAN(NetSDKModel):
     #: Full names of the ports carrying it untagged (access ports), joining
     #: `Interface.name`. Trunk membership is a separate getter.
     interfaces: tuple[str, ...] = ()
+
+
+class Switchport(NetSDKModel):
+    """One layer-2 (switched) port. Routed ports have no record.
+
+    Allowed VLANs are what the port's trunk configuration permits, reported
+    whatever the current mode: `all_vlans_allowed` when the device says "all";
+    otherwise `allowed_vlans` lists them, empty for "none" and None when the
+    device doesn't print the list at all.
+    """
+
+    #: Full name, joining `Interface.name`.
+    interface: str
+    #: Operational mode; None when the port is down or in another mode
+    #: (private VLAN, ...). The raw strings stay on the vendor model.
+    mode: Literal["access", "trunk"] | None
+    access_vlan: int | None = Field(default=None, ge=1, le=4094)
+    native_vlan: int | None = Field(default=None, ge=1, le=4094)
+    all_vlans_allowed: bool = False
+    allowed_vlans: tuple[int, ...] | None = None
+
+    @model_validator(mode="after")
+    def _check_allowed_vlans(self) -> Self:
+        if self.all_vlans_allowed and self.allowed_vlans is not None:
+            raise ValueError("allowed_vlans must be None when all_vlans_allowed is set")
+        if self.allowed_vlans is not None:
+            if any(not 1 <= v <= 4094 for v in self.allowed_vlans):
+                raise ValueError("allowed VLAN IDs must be 1-4094")
+            if list(self.allowed_vlans) != sorted(set(self.allowed_vlans)):
+                raise ValueError("allowed_vlans must be sorted and unique")
+        return self

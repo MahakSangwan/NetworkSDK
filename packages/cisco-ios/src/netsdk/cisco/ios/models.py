@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from netsdk.core import VLAN, Facts, Interface, MacAddress, NetSDKModel
+from netsdk.core import VLAN, Facts, Interface, MacAddress, NetSDKModel, Switchport
 
 VTPMode = Literal["server", "primary server", "client", "transparent", "off"]
 
@@ -80,3 +80,17 @@ class IOSVTPStatus(NetSDKModel):
     #: v1/v2 server: the address this device sends updates from, and its interface.
     updater_id: IPv4Address | None = None
     updater_interface: str | None = None
+
+
+class IOSSwitchport(Switchport):
+    """Switchport plus what IOS `show interfaces switchport` adds."""
+
+    #: As printed: "static access", "trunk", "dynamic auto", "dynamic desirable", ...
+    admin_mode: str
+    #: As printed: "static access", "trunk", "down", ...; None when not printed.
+    oper_mode: str | None = None
+    voice_vlan: int | None = Field(default=None, ge=1, le=4094)
+    #: DTP: "Negotiation of Trunking" On/Off.
+    negotiation: bool | None = None
+    #: Operational trunking encapsulation, e.g. "dot1q", "native".
+    encapsulation: str | None = None

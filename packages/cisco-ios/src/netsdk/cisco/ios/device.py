@@ -8,14 +8,16 @@ from typing import ClassVar
 
 from netsdk.cisco.ios.commands import (
     SHOW_INTERFACES,
+    SHOW_INTERFACES_SWITCHPORT,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
 )
-from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSVTPStatus
+from netsdk.cisco.ios.models import IOSVLAN, IOSFacts, IOSInterface, IOSSwitchport, IOSVTPStatus
 from netsdk.cisco.ios.parsers import (
     parse_show_interfaces,
+    parse_show_interfaces_switchport,
     parse_show_ip_interface,
     parse_show_version,
     parse_show_vlan_brief,
@@ -159,6 +161,24 @@ class CiscoIOS(Device):
 
     def get_vlans_raw(self) -> dict[str, str]:
         return {SHOW_VLAN_BRIEF: self._send_if_supported(SHOW_VLAN_BRIEF, "no VLAN support")}
+
+    def get_switchports(self) -> list[IOSSwitchport]:
+        """Layer-2 ports with mode, access/native/voice VLAN and allowed VLANs.
+
+        Routed ports are left out. The order is Genie's, not the device's.
+        Raises NotSupportedError on a device without switch ports (e.g. a
+        router).
+        """
+        raw = self.get_switchports_raw()
+        with self._attributed():
+            return parse_show_interfaces_switchport(raw[SHOW_INTERFACES_SWITCHPORT])
+
+    def get_switchports_raw(self) -> dict[str, str]:
+        return {
+            SHOW_INTERFACES_SWITCHPORT: self._send_if_supported(
+                SHOW_INTERFACES_SWITCHPORT, "no switch ports"
+            )
+        }
 
     def get_vtp_status(self) -> IOSVTPStatus:
         """VTP version, domain, mode and revision of the VLAN database.

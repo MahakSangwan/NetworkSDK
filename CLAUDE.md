@@ -19,9 +19,9 @@ changing design.
   a matching `get_<plural_noun>_raw()`.
 - No mutation in getters. Getter accounts are read-only.
 - Device packages keep three layers: transport, commands/endpoints, parsers.
-- Parsers map ntc-templates or Genie results (D27, D32); no hand-written
-  parsers for whole commands. Genie is a hard dependency, used only for the
-  commands D32 lists.
+- Parsers map Genie results (default) or ntc-templates ones (fallback,
+  D33); no hand-written parsers for whole commands. Genie is a hard
+  dependency. D33 lists which engine parses each command.
 - Shared models in core only for truly cross-vendor concepts; vendors subclass.
 - Errors derive from `netsdk.core.NetSDKError`; never shadow builtins.
 - Code must run on Python 3.12 (`requires-python >=3.12`).
