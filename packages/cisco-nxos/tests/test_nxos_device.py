@@ -59,11 +59,19 @@ def test_get_facts_sends_only_its_two_commands(
     assert conn.writes == [f"{SHOW_VERSION}\n", f"{SHOW_INVENTORY}\n", "exit\n"]
 
 
-def test_93_noise_and_one_line_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def wrap_511(text: str) -> str:
+    # NX-OS hard-wraps one-line JSON at the 511-column terminal (live, 10.5).
+    return "\r\n".join(text[i : i + 511] for i in range(0, len(text), 511))
+
+
+def test_93_noise_and_wrapped_one_line_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     one_line = {
-        cmd: NOISE_93 + json.dumps(json.loads(text)) + "\r\n"
+        cmd: NOISE_93 + wrap_511(json.dumps(json.loads(text))) + "\r\n"
         for cmd, text in ((SHOW_VERSION, VERSION_JSON), (SHOW_INVENTORY, INVENTORY_JSON))
     }
+    assert "\r\n" in one_line[SHOW_VERSION][len(NOISE_93) :]
     cli = nxos_cli({cmd: [text] for cmd, text in one_line.items()})
     with make_device(monkeypatch, tmp_path, cli.connection()) as device:
         assert device.get_facts().serial_number == "TM6017D760B"

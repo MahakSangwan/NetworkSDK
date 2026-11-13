@@ -24,6 +24,12 @@ def parse_json(command: str, output: str) -> dict[str, Any]:
     `SB: Permission denied.` ahead of every `| json` output) are logged and
     ignored; they are never read as data. Raises ParseError when there is no
     object, it is broken or cut short, or anything follows it.
+
+    Line breaks inside the object are removed before decoding: NX-OS
+    hard-wraps its one-line JSON at the terminal width (511 at most), often
+    inside a string. That is always safe: JSON never needs a newline to
+    separate tokens, and a raw newline inside a string is invalid JSON, so a
+    newline is either indentation or a wrap break.
     """
     lines = output.split("\n")
     start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("{")), None)
@@ -37,7 +43,7 @@ def parse_json(command: str, output: str) -> dict[str, Any]:
             len(before),
             " | ".join(before),
         )
-    text = "\n".join(lines[start:]).strip()
+    text = "".join(lines[start:]).strip()
     try:
         data, end = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError as exc:

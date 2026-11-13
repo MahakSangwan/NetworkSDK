@@ -133,7 +133,8 @@ def test_json_layout(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> Non
         version = parse_json(SHOW_VERSION, raw[SHOW_VERSION])
         inventory = parse_json(SHOW_INVENTORY, raw[SHOW_INVENTORY])
     for command, output in raw.items():
-        print(f"\n{command!r}: {len(output.splitlines())} line(s)")
+        widths = sorted({len(line) for line in output.splitlines()}, reverse=True)[:3]
+        print(f"\n{command!r}: {len(output.splitlines())} line(s), longest {widths}")
     print(f"show version keys: {', '.join(sorted(version))}")
     print(f"show inventory keys: {', '.join(sorted(inventory))}")
     records = rows(inventory, "TABLE_inv", "ROW_inv", SHOW_INVENTORY)

@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import timedelta
 
@@ -117,6 +118,22 @@ def test_parse_json_ignores_and_logs_lines_before_the_object(
         assert parse_json("show version | json", output) == {"host_name": "sw1"}
     assert "ignoring 4 line(s)" in caplog.text
     assert "drbg_instantiate failed" in caplog.text
+
+
+def wrap(text: str, width: int = 511) -> str:
+    return "\n".join(text[i : i + width] for i in range(0, len(text), width))
+
+
+@pytest.mark.parametrize("width", [511, 80, 7, 1])
+def test_parse_json_joins_lines_wrapped_at_the_terminal_width(width: int) -> None:
+    # NX-OS 10.5 wraps one-line `| json` output every 511 columns, inside
+    # strings too (live, 2026-11-13). Spaces at a break must survive.
+    data = {"header_str": "Cisco Nexus " * 60 + "\nend", "n": [1, 22, 333], "ok": True}
+    one_line = json.dumps(data)
+    assert len(one_line) > 511
+    assert parse_json("show version | json", "SB: x\n" + wrap(one_line, width)) == data
+    indented = json.dumps(data, indent=2)
+    assert parse_json("show version | json", wrap(indented, width)) == data
 
 
 @pytest.mark.parametrize(
