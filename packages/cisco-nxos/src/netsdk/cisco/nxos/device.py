@@ -6,9 +6,9 @@ from os import PathLike
 from pathlib import Path
 from typing import ClassVar
 
-from netsdk.cisco.nxos.commands import SHOW_INVENTORY, SHOW_VERSION
-from netsdk.cisco.nxos.models import NXOSFacts
-from netsdk.cisco.nxos.parsers import parse_facts
+from netsdk.cisco.nxos.commands import SHOW_INTERFACE, SHOW_INVENTORY, SHOW_VERSION
+from netsdk.cisco.nxos.models import NXOSFacts, NXOSInterface
+from netsdk.cisco.nxos.parsers import parse_facts, parse_show_interface
 from netsdk.cisco.nxos.transport import NXOSSSHTransport
 from netsdk.core import Credentials, Device, DeviceConnectionError, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
@@ -105,6 +105,15 @@ class CiscoNXOS(Device):
 
     def get_facts_raw(self) -> dict[str, str]:
         return {command: self.send_command(command) for command in (SHOW_VERSION, SHOW_INVENTORY)}
+
+    def get_interfaces(self) -> list[NXOSInterface]:
+        """Every interface with admin/oper state, MAC, MTU, speed and duplex."""
+        raw = self.get_interfaces_raw()
+        with self._attributed():
+            return parse_show_interface(raw[SHOW_INTERFACE])
+
+    def get_interfaces_raw(self) -> dict[str, str]:
+        return {SHOW_INTERFACE: self.send_command(SHOW_INTERFACE)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

@@ -17,6 +17,7 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | Getter | Commands | Notes |
 |---|---|---|
 | `get_facts()` | `show version \| json`, `show inventory \| json` | Model and serial are the chassis entry of `show inventory`. |
+| `get_interfaces()` | `show interface \| json` | Every interface incl. SVIs, port-channels, `mgmt0` and FEX ports; no counters or IPs. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
 Lines NX-OS prints ahead of the JSON (`SB: Permission denied.` on 9.3) are

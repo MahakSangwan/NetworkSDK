@@ -6,3 +6,4 @@ by hand on the bench before it was added.
 
 SHOW_VERSION = "show version | json"
 SHOW_INVENTORY = "show inventory | json"
+SHOW_INTERFACE = "show interface | json"

@@ -22,6 +22,7 @@ has no hostnames, serials or addresses: it gets pasted back for review.
 import json
 import logging
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ import pytest
 from pydantic import SecretStr
 
 from netsdk.cisco.nxos import CiscoNXOS
-from netsdk.cisco.nxos.commands import SHOW_INVENTORY, SHOW_VERSION
+from netsdk.cisco.nxos.commands import SHOW_INTERFACE, SHOW_INVENTORY, SHOW_VERSION
 from netsdk.cisco.nxos.parsers import rows, text
 from netsdk.core import AuthenticationError, CommandError, Credentials, DeviceConnectionError
 from netsdk.core.parsing import parse_json
@@ -161,6 +162,73 @@ def test_get_facts(shared: CiscoNXOS) -> None:
     board = text(parse_json(SHOW_VERSION, shared.get_facts_raw()[SHOW_VERSION]), "proc_board_id")
     print(f"show version board ID is the chassis serial: {board == facts.serial_number}")
     assert facts.vendor == "Cisco"
+
+
+#: Field names get_interfaces() reads, per field set.
+_ETH_FIELDS = [
+    "admin_state",
+    "state",
+    "state_rsn_desc",
+    "desc",
+    "eth_hw_addr",
+    "eth_mtu",
+    "eth_speed",
+    "eth_duplex",
+    "eth_hw_desc",
+    "eth_bia_addr",
+    "eth_bw",
+    "eth_mode",
+]
+_SVI_FIELDS = [
+    "svi_admin_state",
+    "svi_line_proto",
+    "svi_rsn_desc",
+    "svi_desc",
+    "svi_mac",
+    "svi_mtu",
+    "svi_bw",
+]
+_DESCRIBE = re.compile(r"state|desc|mtu|speed|duplex|addr|mac|bw|mode|proto")
+
+
+@needs_device
+def test_interface_field_sets(shared: CiscoNXOS) -> None:
+    # Field names only (no values), per interface type: confirms the mapping.
+    data = parse_json(SHOW_INTERFACE, shared.get_interfaces_raw()[SHOW_INTERFACE])
+    records = rows(data, "TABLE_interface", "ROW_interface", SHOW_INTERFACE)
+    by_type: dict[str, list[dict[str, Any]]] = {}
+    for r in records:
+        by_type.setdefault(re.sub(r"[\d/.]+$", "", str(r.get("interface"))), []).append(r)
+    for kind, group in sorted(by_type.items()):
+        keys = set().union(*group)
+        field_set = "svi" if "svi_admin_state" in keys else "eth" if "admin_state" in keys else "?"
+        used = _SVI_FIELDS if field_set == "svi" else _ETH_FIELDS
+        never = [k for k in used if k not in keys]
+        print(f"\n{kind}: {len(group)} interface(s), field set {field_set}")
+        print(f"  never present: {', '.join(never) or '-'}")
+        other = sorted(k for k in keys - set(used) if _DESCRIBE.search(k))
+        print(f"  other state/address-like fields: {', '.join(other) or '-'}")
+    assert records
+
+
+@needs_device
+def test_get_interfaces(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        interfaces = shared.get_interfaces()
+    print(f"\n{len(interfaces)} interfaces")
+    # No MACs or descriptions: this output gets pasted back for review.
+    print(f"{'name':<22} {'en':<3} {'up':<3} {'speed':>10} {'duplex':<6} {'mtu':>5} mode/reason")
+    for i in interfaces:
+        print(
+            f"{i.name:<22} {i.enabled!s:<3.1} {i.oper_up!s:<3.1} {i.speed or '-':>10} "
+            f"{i.duplex or '-':<6} {i.mtu or '-':>5} {i.port_mode or '-'}/{i.state_reason or '-'}"
+        )
+    with_mac = sum(i.mac_address is not None for i in interfaces)
+    with_desc = sum(i.description is not None for i in interfaces)
+    print(f"{with_mac} of {len(interfaces)} have a MAC address, {with_desc} a description")
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    assert interfaces
 
 
 @needs_device
