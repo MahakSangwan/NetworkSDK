@@ -138,6 +138,23 @@ def test_73_without_admin_state(
     )
 
 
+def test_loopback_without_mac_speed_or_mode() -> None:
+    # A loopback has the eth field set without these (live, 2026-11-13).
+    loopback = {"interface": "loopback0", "state": "up", "admin_state": "up", "eth_mtu": "1500"}
+    interface = one(loopback)
+    assert (interface.enabled, interface.oper_up, interface.mtu) == (True, True, 1500)
+    assert interface.model_dump(
+        include={"mac_address", "speed", "duplex", "port_mode", "state_reason"}
+    ) == dict.fromkeys(("mac_address", "speed", "duplex", "port_mode", "state_reason"))
+
+
+def test_unknown_name_with_a_known_field_set_is_mapped() -> None:
+    # Mapping goes by field set, never by name: new interface types just work.
+    assert one(ETH | {"interface": "nve1"}).name == "nve1"
+    svi_like = {"interface": "Bdi7", "svi_admin_state": "up", "svi_line_proto": "down"}
+    assert (one(svi_like).enabled, one(svi_like).oper_up) == (True, False)
+
+
 def test_admin_state_wins_over_the_reason() -> None:
     record = ETH | {"state": "down", "state_rsn_desc": "Administratively down"}
     assert one(record).enabled is True  # admin_state "up" is what the device says
