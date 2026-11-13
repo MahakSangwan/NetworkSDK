@@ -3,3 +3,4 @@
 *.raw -text
 # Upstream fixture samples, kept byte-exact (trailing spaces included).
 packages/*/tests/fixtures/**/*.txt -text
+packages/*/tests/fixtures/**/*.json -text

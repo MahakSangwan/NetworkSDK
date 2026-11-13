@@ -127,33 +127,49 @@ class _Connection(Protocol):
 
 
 def render_terminal(text: str) -> str:
-    """Apply carriage returns and backspaces the way a terminal would.
+    """Apply carriage returns, backspaces and ANSI escapes the way a terminal would.
 
-    Pagers erase their prompt with backspaces or `\\r` plus spaces; this
-    turns raw channel data into what a person would have seen. Line endings
-    are normalized to `\\n`.
+    Pagers erase their prompt with backspaces, `\\r` plus spaces, or `\\r`
+    plus an erase-line escape (`ESC[K`); this turns raw channel data into what
+    a person would have seen. Other escape sequences (colours, reverse video)
+    are dropped. Line endings are normalized to `\\n`.
     """
     text = re.sub(r"\r+\n", "\n", text)
     lines = []
     for line in text.split("\n"):
-        if "\r" not in line and "\b" not in line:
+        if "\r" not in line and "\b" not in line and "\x1b" not in line:
             lines.append(line)
             continue
         screen: list[str] = []
         cursor = 0
-        for char in line:
-            if char == "\r":
-                cursor = 0
-            elif char == "\b":
-                cursor = max(cursor - 1, 0)
-            else:
-                if cursor < len(screen):
-                    screen[cursor] = char
-                else:
-                    screen.append(char)
-                cursor += 1
+        for part in _ESCAPE.split(line):
+            if part.startswith("\x1b"):
+                if part.endswith("K"):  # erase from the cursor to the end of the line
+                    del screen[cursor:]
+                continue
+            cursor = _draw(screen, cursor, part)
         lines.append("".join(screen).rstrip())
     return "\n".join(lines)
+
+
+# A CSI sequence (ESC [ ... final byte); split() keeps it as its own part.
+_ESCAPE = re.compile(r"(\x1b\[[0-9;?]*[@-~])")
+
+
+def _draw(screen: list[str], cursor: int, text: str) -> int:
+    for char in text:
+        if char == "\r":
+            cursor = 0
+        elif char == "\b":
+            cursor = max(cursor - 1, 0)
+        else:
+            if cursor < len(screen):
+                screen[cursor] = char
+            else:
+                screen.extend(" " * (cursor - len(screen)))
+                screen.append(char)
+            cursor += 1
+    return cursor
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

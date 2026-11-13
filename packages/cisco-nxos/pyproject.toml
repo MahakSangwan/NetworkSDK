@@ -1,0 +1,25 @@
+[project]
+name = "netsdk-cisco-nxos"
+version = "0.1.0"
+description = "netsdk SDK for Cisco NX-OS (standalone Nexus) devices"
+readme = "README.md"
+authors = [
+    { name = "Mahak", email = "mousamsangwan1@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    # Commands are read as `| json` (D38); Genie and ntc-templates join as
+    # hard dependencies with the first command that has no JSON.
+    "netsdk-core[ssh]>=0.1,<0.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# PEP 420 namespace package: src/netsdk/ and src/netsdk/cisco/ have no __init__.py.
+module-name = "netsdk.cisco.nxos"
+
+[tool.uv.sources]
+netsdk-core = { workspace = true }

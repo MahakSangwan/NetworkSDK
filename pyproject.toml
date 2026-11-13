@@ -28,7 +28,7 @@ python_version = "3.12"
 strict = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = ["packages/core/src", "packages/cisco-ios/src"]
+mypy_path = ["packages/core/src", "packages/cisco-ios/src", "packages/cisco-nxos/src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

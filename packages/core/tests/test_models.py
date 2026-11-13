@@ -1,10 +1,11 @@
+import logging
 from datetime import timedelta
 
 import pytest
 from pydantic import ValidationError
 
 from netsdk.core import Facts, NotSupportedError, ParseError, SupportsFacts, Switchport
-from netsdk.core.parsing import parse_genie, parse_textfsm
+from netsdk.core.parsing import parse_genie, parse_json, parse_textfsm
 
 FACTS = {
     "hostname": "r1",
@@ -86,6 +87,53 @@ def test_parse_genie_failures_are_parse_errors(command: str, output: str) -> Non
     with pytest.raises(ParseError) as excinfo:
         parse_genie("ios", command, output)
     assert not isinstance(excinfo.value, NotSupportedError)
+
+
+# -- parse_json -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param('{"a": 1, "b": {"c": [1, 2]}}', id="one-line"),
+        pytest.param('{\n  "a": 1,\n  "b": {\n    "c": [1, 2]\n  }\n}\n', id="indented"),
+        pytest.param('\n  {"a": 1, "b": {"c": [1, 2]}}  \n\n', id="blank-lines-around"),
+    ],
+)
+def test_parse_json(output: str) -> None:
+    assert parse_json("show x | json", output) == {"a": 1, "b": {"c": [1, 2]}}
+
+
+def test_parse_json_ignores_and_logs_lines_before_the_object(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # As NX-OS 9.3 prints them ahead of every `| json` output.
+    output = (
+        "SB: Permission denied.\nSB: Permission denied.\nSB: Permission denied.\n"
+        "drbg_instantiate failed\n"
+        '{"host_name": "sw1"}'
+    )
+    with caplog.at_level(logging.INFO, logger="netsdk.core.parsing"):
+        assert parse_json("show version | json", output) == {"host_name": "sw1"}
+    assert "ignoring 4 line(s)" in caplog.text
+    assert "drbg_instantiate failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("% Invalid command at '^' marker.", id="error-text"),
+        pytest.param('{"a": [1, 2', id="cut-short"),
+        pytest.param('{"a": 1}\n{"b": 2}', id="two-objects"),
+        pytest.param('{"a": 1}\ntrailing text', id="text-after"),
+        pytest.param('[{"a": 1}]', id="not-an-object"),
+        pytest.param('{"a": 1\n --More-- \n, "b": 2}', id="pager-left-inside"),
+    ],
+)
+def test_parse_json_failures_are_parse_errors(output: str) -> None:
+    with pytest.raises(ParseError):
+        parse_json("show x | json", output)
 
 
 # -- Switchport ------------------------------------------------------------

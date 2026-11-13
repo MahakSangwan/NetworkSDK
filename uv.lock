@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "netsdk-cisco-ios",
+    "netsdk-cisco-nxos",
     "netsdk-core",
 ]
 
@@ -1739,6 +1740,17 @@ requires-dist = [
     { name = "ntc-templates", specifier = ">=9.3,<10" },
     { name = "pyats", specifier = ">=26.10,<27" },
 ]
+
+[[package]]
+name = "netsdk-cisco-nxos"
+version = "0.1.0"
+source = { editable = "packages/cisco-nxos" }
+dependencies = [
+    { name = "netsdk-core", extra = ["ssh"] },
+]
+
+[package.metadata]
+requires-dist = [{ name = "netsdk-core", extras = ["ssh"], editable = "packages/core" }]
 
 [[package]]
 name = "netsdk-core"

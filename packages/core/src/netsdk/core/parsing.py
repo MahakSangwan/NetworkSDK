@@ -1,15 +1,52 @@
 """Helpers for the parsers layer of CLI device packages.
 
-CLI output is parsed with Cisco's Genie by default, or with ntc-templates
-(TextFSM) where Genie falls short; the decision log lists which per command
-(D33). Each engine needs its extra (`genie`, `ssh`); importing this module
-works without them.
+Devices that can print JSON (NX-OS `| json`, D38) are read with
+`parse_json`. Text output is parsed with Cisco's Genie by default, or with
+ntc-templates (TextFSM) where Genie falls short; the decision log lists which
+per command (D33). Each text engine needs its extra (`genie`, `ssh`);
+importing this module works without them.
 """
 
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from netsdk.core.exceptions import ParseError
+
+log = logging.getLogger(__name__)
+
+
+def parse_json(command: str, output: str) -> dict[str, Any]:
+    """Read the one JSON object a CLI printed for `command`.
+
+    Lines the device prints before the object (NX-OS 9.3 prints
+    `SB: Permission denied.` ahead of every `| json` output) are logged and
+    ignored; they are never read as data. Raises ParseError when there is no
+    object, it is broken or cut short, or anything follows it.
+    """
+    lines = output.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("{")), None)
+    if start is None:
+        raise ParseError(f"{command!r} output has no JSON object")
+    before = [line.strip() for line in lines[:start] if line.strip()]
+    if before:
+        log.info(
+            "%r: ignoring %d line(s) printed before the JSON: %s",
+            command,
+            len(before),
+            " | ".join(before),
+        )
+    text = "\n".join(lines[start:]).strip()
+    try:
+        data, end = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError as exc:
+        raise ParseError(f"{command!r} output is not valid JSON: {exc}") from exc
+    if text[end:].strip():
+        raise ParseError(f"{command!r} output continues after its JSON object")
+    if not isinstance(data, dict):
+        raise ParseError(f"{command!r} output is JSON but not an object")
+    return data
 
 
 def parse_textfsm(

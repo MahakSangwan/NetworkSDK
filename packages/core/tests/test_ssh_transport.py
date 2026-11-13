@@ -61,6 +61,11 @@ def test_satisfies_transport_protocol(tmp_path: Path) -> None:
         (" --More-- \r          \rnext", "next"),
         ("abc\b\bX", "aXc"),
         ("plain line", "plain line"),
+        # Reverse-video pager prompt erased with ESC[K.
+        ("\x1b[7m--More--\x1b[m\r\x1b[K{}", "{}"),
+        ("\x1b[1mbold\x1b[0m text", "bold text"),
+        ("abcdef\r\x1b[Kxy", "xy"),
+        ("abcdef\b\b\b\x1b[K", "abc"),
     ],
 )
 def test_render_terminal(raw: str, expected: str) -> None:

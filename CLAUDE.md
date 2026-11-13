@@ -10,7 +10,8 @@ changing design.
 - One package per platform under `packages/<platform>/`, src layout.
 - PEP 420 namespace packages: `src/netsdk/` and vendor dirs like
   `src/netsdk/cisco/` must **never** get an `__init__.py`.
-  Imports: `netsdk.core`, `netsdk.cisco.ios`, `netsdk.fortinet.fortigate`.
+  Imports: `netsdk.core`, `netsdk.cisco.ios`, `netsdk.cisco.nxos`,
+  `netsdk.fortinet.fortigate`.
 - Each package sets `[tool.uv.build-backend] module-name` to its dotted name.
 
 ## Conventions
@@ -23,6 +24,8 @@ changing design.
   D33); no hand-written parsers for whole commands. Genie is a hard
   dependency. D33 lists which engine parses each command. A corrected
   template copy is a last resort, tied to an upstream PR (D36).
+- NX-OS: commands are sent with `| json` and read with `parse_json` (D38);
+  Mahak checks each command's JSON support on the bench before it is used.
 - Shared models in core only for truly cross-vendor concepts; vendors subclass.
 - Errors derive from `netsdk.core.NetSDKError`; never shadow builtins.
 - Code must run on Python 3.12 (`requires-python >=3.12`).
@@ -56,4 +59,5 @@ each `tests/live/` module):
 
 ```
 uv run pytest -m live -s packages/cisco-ios/tests/live
+uv run pytest -m live -s packages/cisco-nxos/tests/live
 ```
