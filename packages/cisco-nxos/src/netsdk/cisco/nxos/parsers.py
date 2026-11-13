@@ -136,6 +136,7 @@ _SPEED = re.compile(r"(\d+)\s*([kmgt])b/s", re.IGNORECASE)
 _NOT_NEGOTIATED = {"auto-speed", "auto"}
 _DUPLEX: dict[str, Duplex] = {"full": "full", "half": "half", "auto": "auto"}
 _UP_DOWN = {"up": True, "down": False}
+_ADMIN_DOWN = "administratively down"
 
 
 def parse_show_interface(output: str) -> list[NXOSInterface]:
@@ -156,7 +157,7 @@ def _interface(record: dict[str, Any]) -> NXOSInterface:
     if not name:
         raise ParseError(f"{SHOW_INTERFACE!r} has an interface without a name")
     # NX-OS reports interfaces in one of two field sets, whatever the name:
-    # SVIs use svi_*, everything else seen so far state/admin_state/eth_*.
+    # SVIs use svi_*, everything else seen so far state/eth_* (D39).
     if "svi_admin_state" in record:
         fields = {
             "enabled": _up_down(name, record, "svi_admin_state"),
@@ -167,9 +168,9 @@ def _interface(record: dict[str, Any]) -> NXOSInterface:
             "state_reason": text(record, "svi_rsn_desc"),
             "bandwidth": _count(name, record, "svi_bw"),
         }
-    elif "admin_state" in record:
+    elif "state" in record:
         fields = {
-            "enabled": _up_down(name, record, "admin_state"),
+            "enabled": _enabled(name, record),
             # `state` is "up", "down" or a reason; only "up" is up.
             "oper_up": text(record, "state") == "up",
             "description": text(record, "desc"),
@@ -185,13 +186,23 @@ def _interface(record: dict[str, Any]) -> NXOSInterface:
         }
     else:
         raise ParseError(
-            f"{SHOW_INTERFACE!r}: {name} has neither admin_state nor svi_admin_state; "
+            f"{SHOW_INTERFACE!r}: {name} has neither state nor svi_admin_state; "
             f"fields: {', '.join(sorted(record))}"
         )
     try:
         return NXOSInterface(name=name, **fields)
     except ValidationError as exc:
         raise ParseError(f"unexpected {SHOW_INTERFACE!r} value for {name}: {exc}") from exc
+
+
+def _enabled(name: str, record: dict[str, Any]) -> bool:
+    if "admin_state" in record:
+        return _up_down(name, record, "admin_state")
+    # 7.3(11)N1(1) prints no admin_state (live, 2026-11-13). A shut port is
+    # down with the reason "Administratively down", as in the text output.
+    if text(record, "state") == "up":
+        return True
+    return (text(record, "state_rsn_desc") or "").casefold() != _ADMIN_DOWN
 
 
 def _up_down(name: str, record: dict[str, Any], key: str) -> bool:

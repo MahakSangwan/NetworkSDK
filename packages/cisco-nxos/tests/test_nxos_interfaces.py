@@ -112,6 +112,37 @@ def test_unknown_speed_and_duplex_are_logged_not_fatal(caplog: pytest.LogCapture
     assert "unrecognised duplex 'sideways'" in caplog.text
 
 
+# 7.3(11)N1(1) has no admin_state (field names from the live run, 2026-11-13).
+ETH_73 = {k: v for k, v in ETH.items() if k != "admin_state"} | {"share_state": "Dedicated"}
+
+
+@pytest.mark.parametrize(
+    ("state", "reason", "enabled", "oper_up"),
+    [
+        ("up", None, True, True),
+        ("down", "SFP not inserted", True, False),
+        ("down", "Link not connected", True, False),
+        ("down", "Administratively down", False, False),
+        ("down", None, True, False),
+    ],
+)
+def test_73_without_admin_state(
+    state: str, reason: str | None, enabled: bool, oper_up: bool
+) -> None:
+    record = ETH_73 | {"state": state} | ({"state_rsn_desc": reason} if reason else {})
+    interface = one(record)
+    assert (interface.enabled, interface.oper_up, interface.state_reason) == (
+        enabled,
+        oper_up,
+        reason,
+    )
+
+
+def test_admin_state_wins_over_the_reason() -> None:
+    record = ETH | {"state": "down", "state_rsn_desc": "Administratively down"}
+    assert one(record).enabled is True  # admin_state "up" is what the device says
+
+
 def test_only_up_is_oper_up() -> None:
     assert one(ETH | {"state": "down"}).oper_up is False
     assert one(ETH | {"state": "sfp-not-inserted"}).oper_up is False

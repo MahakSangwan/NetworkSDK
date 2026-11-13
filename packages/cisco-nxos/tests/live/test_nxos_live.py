@@ -201,7 +201,7 @@ def test_interface_field_sets(shared: CiscoNXOS) -> None:
         by_type.setdefault(re.sub(r"[\d/.]+$", "", str(r.get("interface"))), []).append(r)
     for kind, group in sorted(by_type.items()):
         keys = set().union(*group)
-        field_set = "svi" if "svi_admin_state" in keys else "eth" if "admin_state" in keys else "?"
+        field_set = "svi" if "svi_admin_state" in keys else "eth" if "state" in keys else "?"
         used = _SVI_FIELDS if field_set == "svi" else _ETH_FIELDS
         never = [k for k in used if k not in keys]
         print(f"\n{kind}: {len(group)} interface(s), field set {field_set}")
