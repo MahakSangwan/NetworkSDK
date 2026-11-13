@@ -7,3 +7,5 @@ by hand on the bench before it was added.
 SHOW_VERSION = "show version | json"
 SHOW_INVENTORY = "show inventory | json"
 SHOW_INTERFACE = "show interface | json"
+# Every VRF: plain `show ip interface` covers `default` only (D38).
+SHOW_IP_INTERFACE = "show ip interface vrf all | json"

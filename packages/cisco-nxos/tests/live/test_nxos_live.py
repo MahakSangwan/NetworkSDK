@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -31,9 +32,20 @@ import pytest
 from pydantic import SecretStr
 
 from netsdk.cisco.nxos import CiscoNXOS
-from netsdk.cisco.nxos.commands import SHOW_INTERFACE, SHOW_INVENTORY, SHOW_VERSION
+from netsdk.cisco.nxos.commands import (
+    SHOW_INTERFACE,
+    SHOW_INVENTORY,
+    SHOW_IP_INTERFACE,
+    SHOW_VERSION,
+)
 from netsdk.cisco.nxos.parsers import rows, text
-from netsdk.core import AuthenticationError, CommandError, Credentials, DeviceConnectionError
+from netsdk.core import (
+    AuthenticationError,
+    CommandError,
+    Credentials,
+    DeviceConnectionError,
+    IPAddress,
+)
 from netsdk.core.parsing import parse_json
 
 pytestmark = pytest.mark.live
@@ -229,6 +241,90 @@ def test_get_interfaces(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> 
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
     assert interfaces
+
+
+def _shape(value: Any) -> str:
+    if isinstance(value, list):
+        return f"list of {len(value)}"
+    return type(value).__name__
+
+
+@needs_device
+def test_ip_interface_layout(shared: CiscoNXOS) -> None:
+    # Structure and field names only (no values): confirms how VRFs pair up.
+    data = parse_json(SHOW_IP_INTERFACE, shared.get_ip_addresses_raw()[SHOW_IP_INTERFACE])
+    print(f"\ntop-level keys: {', '.join(data)}")
+    for table in ("TABLE_vrf", "TABLE_intf"):
+        entries = data.get(table)
+        print(f"{table}: {_shape(entries)}")
+        items = entries if isinstance(entries, list) else [entries] if entries else []
+        print(f"  entry keys: {sorted({k for e in items if isinstance(e, dict) for k in e})}")
+        rows_ = [r for e in items if isinstance(e, dict) for r in e.values() if isinstance(r, dict)]
+        print(f"  row keys: {sorted({k for r in rows_ for k in r})}")
+        nested = {k: _shape(r[k]) for r in rows_ for k in r if isinstance(r[k], dict | list)}
+        print(f"  nested in rows: {nested or '-'}")
+        secondary = [r["TABLE_secondary_address"] for r in rows_ if "TABLE_secondary_address" in r]
+        if secondary:
+            keys = {
+                k
+                for t in secondary
+                for row in ([t.get("ROW_secondary_address")] if isinstance(t, dict) else [])
+                for item in (row if isinstance(row, list) else [row])
+                if isinstance(item, dict)
+                for k in item
+            }
+            print(f"  secondary address keys: {sorted(keys)}")
+
+
+_VRF_HEADING = re.compile(r'^IP Interface Status for VRF "([^"]+)"')
+_BRIEF_ROW = re.compile(r"^\S+\s+(\d+\.\d+\.\d+\.\d+)\s")
+
+
+@needs_device
+def test_get_ip_addresses(shared: CiscoNXOS) -> None:
+    addresses = shared.get_ip_addresses()
+    # No addresses or VRF names: this output gets pasted back for review.
+    named = sorted({a.vrf for a in addresses if a.vrf and a.vrf != "management"})
+
+    def label(vrf: str | None) -> str:
+        if vrf is None:
+            return "global"
+        return "management" if vrf == "management" else f"VRF {named.index(vrf) + 1}"
+
+    print(f"\n{len(addresses)} addresses in {len(named)} other VRF(s) + management + global")
+    print(f"{'interface':<22} {'prefixes':<16} {'secondary':<9} vrf")
+    by_interface: dict[str, list[IPAddress]] = {}
+    for address in addresses:
+        by_interface.setdefault(address.interface, []).append(address)
+    for name, records in by_interface.items():
+        prefixes = ",".join(f"/{a.address.network.prefixlen}" for a in records)
+        secondary = "yes" if any(a.secondary for a in records) else "-"
+        print(f"{name:<22} {prefixes:<16} {secondary:<9} {label(records[0].vrf)}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted(set(by_interface) - interface_names)
+    assert not unknown, f"addresses on interfaces get_interfaces() doesn't list: {unknown}"
+
+    # Cross-check the VRF pairing against the text output, which prints a
+    # heading per VRF: every primary (VRF, address) must match.
+    brief: Counter[tuple[str | None, str]] = Counter()
+    vrf: str | None = None
+    for line in shared.send_command("show ip interface brief vrf all").splitlines():
+        if heading := _VRF_HEADING.match(line):
+            vrf = None if heading[1] == "default" else heading[1]
+        elif row := _BRIEF_ROW.match(line):
+            brief[(vrf, row[1])] += 1
+    ours = Counter((a.vrf, str(a.address.ip)) for a in addresses if not a.secondary)
+    only_ours, only_brief = ours - brief, brief - ours
+    print(f"primary addresses: {sum(ours.values())} here, {sum(brief.values())} in the brief text")
+    differ = (sum(only_ours.values()), sum(only_brief.values()))
+    print(f"VRF/address pairs that differ: {differ[0]} here, {differ[1]} there")
+    known = {None, "management", *named}
+    for side, diff in (("here only", only_ours), ("brief only", only_brief)):
+        for (v, _), count in diff.items():
+            where = label(v) if v in known else "a VRF with no addresses here"
+            print(f"  {side}: {count} in {where}")
+    assert not only_ours, "get_ip_addresses() has VRF/address pairs the brief text lacks"
+    assert not only_brief, "the brief text has VRF/address pairs get_ip_addresses() lacks"
 
 
 @needs_device

@@ -14,6 +14,7 @@ commit `820a06b2069eb1d7b0cbe8943ee2dea6e2949d1a`), under the Apache License
 | `nxapi_vlan_interface_show_interface.json` | `nxos/.../test_get_interfaces/vlan_interface/show_interface.json` |
 | `nxapi_admin_up_oper_down_show_interface.json` | `nxos/.../test_get_interfaces/admin_up_oper_down/show_interface.json` |
 | `ssh_Nexus3548_show_interface_json.txt` | `nxos_ssh/.../test_get_interfaces_counters/Nexus3548/show_interface___json.txt` |
+| `nxapi_ipv6_n9k_show_ip_interface.json` | `nxos/.../test_get_interfaces_ip/ipv6_n9k/show_ip_interface.json` (IPv4 only, `default` VRF only) |
 
 The `nxapi_` files are NX-API responses; NX-API returns the same structure
 as `| json` over SSH. The expected values in the tests are ours, read off

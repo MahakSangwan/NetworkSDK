@@ -18,6 +18,7 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 |---|---|---|
 | `get_facts()` | `show version \| json`, `show inventory \| json` | Model and serial are the chassis entry of `show inventory`. |
 | `get_interfaces()` | `show interface \| json` | Every interface incl. SVIs, port-channels, `mgmt0` and FEX ports; no counters or IPs. |
+| `get_ip_addresses()` | `show ip interface vrf all \| json` | One record per IPv4 address (primary, then secondaries) with its VRF; `default` is None. Unnumbered interfaces have none. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
 Lines NX-OS prints ahead of the JSON (`SB: Permission denied.` on 9.3) are

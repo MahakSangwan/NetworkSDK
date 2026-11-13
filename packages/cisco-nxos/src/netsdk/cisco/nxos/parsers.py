@@ -9,13 +9,19 @@ understand. Raised errors carry no host; the device adds it.
 import logging
 import re
 from datetime import timedelta
+from ipaddress import IPv4Interface
 from typing import Any
 
 from pydantic import ValidationError
 
-from netsdk.cisco.nxos.commands import SHOW_INTERFACE, SHOW_INVENTORY, SHOW_VERSION
+from netsdk.cisco.nxos.commands import (
+    SHOW_INTERFACE,
+    SHOW_INVENTORY,
+    SHOW_IP_INTERFACE,
+    SHOW_VERSION,
+)
 from netsdk.cisco.nxos.models import NXOSFacts, NXOSInterface
-from netsdk.core import Duplex, ParseError
+from netsdk.core import Duplex, IPAddress, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import parse_json
 
@@ -240,3 +246,87 @@ def _duplex(name: str, value: str | None) -> Duplex | None:
     if duplex is None:
         log.warning("%s: unrecognised duplex %r", name, value)
     return duplex
+
+
+# -- show ip interface vrf all ----------------------------------------------
+
+#: The VRF NX-OS calls the global table.
+_DEFAULT_VRF = "default"
+
+
+def parse_show_ip_interface(output: str) -> list[IPAddress]:
+    """One record per IPv4 address: each interface's primary, then its secondaries.
+
+    NX-OS prints two parallel lists, one VRF entry per interface entry (D40):
+    they are paired by position only when their lengths match.
+    """
+    data = parse_json(SHOW_IP_INTERFACE, output)
+    vrfs = [_only_row(entry, "ROW_vrf") for entry in _entries(data, "TABLE_vrf")]
+    interfaces = [_only_row(entry, "ROW_intf") for entry in _entries(data, "TABLE_intf")]
+    if len(vrfs) != len(interfaces):
+        raise ParseError(
+            f"{SHOW_IP_INTERFACE!r} lists {len(vrfs)} VRF entries for {len(interfaces)} "
+            "interfaces; can't tell which VRF each interface is in"
+        )
+    addresses: list[IPAddress] = []
+    seen: set[str] = set()
+    for vrf_row, row in zip(vrfs, interfaces, strict=True):
+        name = text(row, "intf-name")
+        vrf = text(vrf_row, "vrf-name-out")
+        if not name or not vrf:
+            raise ParseError(f"{SHOW_IP_INTERFACE!r} has an entry without interface or VRF name")
+        if name in seen:
+            raise ParseError(f"{SHOW_IP_INTERFACE!r} lists {name} more than once")
+        seen.add(name)
+        if text(row, "unnum-intf"):
+            # Unnumbered: the address belongs to the interface it is
+            # configured on, which has its own record (D30).
+            continue
+        addresses.extend(_addresses(name, None if vrf == _DEFAULT_VRF else vrf, row))
+    return addresses
+
+
+def _addresses(name: str, vrf: str | None, row: dict[str, Any]) -> list[IPAddress]:
+    found = []
+    if text(row, "prefix") is not None:
+        found.append(_address(name, vrf, row, "prefix", "masklen", secondary=False))
+    for entry in rows(row, "TABLE_secondary_address", "ROW_secondary_address", SHOW_IP_INTERFACE):
+        found.append(_address(name, vrf, entry, "prefix1", "masklen1", secondary=True))
+    return found
+
+
+def _address(
+    name: str, vrf: str | None, row: dict[str, Any], ip_key: str, len_key: str, *, secondary: bool
+) -> IPAddress:
+    ip, length = text(row, ip_key), text(row, len_key)
+    try:
+        # A missing prefix length is an error, never assumed /32 (D30).
+        if ip is None or length is None or not length.isdigit():
+            raise ValueError(f"{ip_key}={ip!r}, {len_key}={length!r}")
+        return IPAddress(
+            interface=name,
+            address=IPv4Interface(f"{ip}/{length}"),
+            secondary=secondary,
+            vrf=vrf,
+        )
+    except (ValueError, ValidationError) as exc:
+        raise ParseError(f"{SHOW_IP_INTERFACE!r}: bad address on {name}: {exc}") from exc
+
+
+def _entries(data: dict[str, Any], table: str) -> list[dict[str, Any]]:
+    # Here a TABLE_x is a list of {ROW_x: {...}} objects (one when alone).
+    entries = data.get(table)
+    if entries is None:
+        return []
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        raise ParseError(f"{SHOW_IP_INTERFACE!r} output: {table} is not a list of objects")
+    return entries
+
+
+def _only_row(entry: dict[str, Any], key: str) -> dict[str, Any]:
+    row = entry.get(key)
+    if not isinstance(row, dict):
+        raise ParseError(f"{SHOW_IP_INTERFACE!r} output: an entry has no single {key}")
+    return row
