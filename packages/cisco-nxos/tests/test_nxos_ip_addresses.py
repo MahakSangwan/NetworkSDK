@@ -88,6 +88,44 @@ def test_unnumbered_and_addressless_interfaces_have_no_record() -> None:
     assert [a.interface for a in addresses] == ["loopback0"]
 
 
+def test_interfaces_grouped_per_vrf() -> None:
+    # One TABLE_intf entry per VRF, its ROW_intf a list (live, 2026-11-13).
+    data = {
+        "TABLE_vrf": [
+            {"ROW_vrf": {"vrf-name-out": "BLUE"}},
+            {"ROW_vrf": {"vrf-name-out": "default"}},
+            {"ROW_vrf": {"vrf-name-out": "management"}},
+        ],
+        "TABLE_intf": [
+            {"ROW_intf": [intf("Vlan20", "10.0.20.1", "24"), intf("Vlan21", "10.0.21.1", "24")]},
+            {
+                "ROW_intf": [
+                    intf("Vlan10", "10.0.10.1", "24"),
+                    intf("loopback0", "10.255.0.1", "32"),
+                ]
+            },
+            {"ROW_intf": intf("mgmt0", "192.0.2.10", "24")},
+        ],
+    }
+    addresses = parse_show_ip_interface(json.dumps(data))
+    assert [(a.interface, a.vrf) for a in addresses] == [
+        ("Vlan20", "BLUE"),
+        ("Vlan21", "BLUE"),
+        ("Vlan10", None),
+        ("loopback0", None),
+        ("mgmt0", "management"),
+    ]
+
+
+def test_vrf_entry_with_several_vrfs_is_a_parse_error() -> None:
+    data = {
+        "TABLE_vrf": [{"ROW_vrf": [{"vrf-name-out": "a"}, {"vrf-name-out": "b"}]}],
+        "TABLE_intf": [{"ROW_intf": [intf("Vlan20", "10.0.20.1", "24")]}],
+    }
+    with pytest.raises(ParseError):
+        parse_show_ip_interface(json.dumps(data))
+
+
 def test_single_interface_entry_as_object() -> None:
     data = {
         "TABLE_vrf": {"ROW_vrf": {"vrf-name-out": "management"}},

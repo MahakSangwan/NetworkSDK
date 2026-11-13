@@ -257,20 +257,22 @@ _DEFAULT_VRF = "default"
 def parse_show_ip_interface(output: str) -> list[IPAddress]:
     """One record per IPv4 address: each interface's primary, then its secondaries.
 
-    NX-OS prints two parallel lists, one VRF entry per interface entry (D40):
-    they are paired by position only when their lengths match.
+    NX-OS prints two parallel lists (D40): entry N of TABLE_vrf is one VRF,
+    entry N of TABLE_intf holds that VRF's interfaces (one object, or a list).
+    They are paired by position only when their lengths match.
     """
     data = parse_json(SHOW_IP_INTERFACE, output)
     vrfs = [_only_row(entry, "ROW_vrf") for entry in _entries(data, "TABLE_vrf")]
-    interfaces = [_only_row(entry, "ROW_intf") for entry in _entries(data, "TABLE_intf")]
-    if len(vrfs) != len(interfaces):
+    groups = [_row_list(entry, "ROW_intf") for entry in _entries(data, "TABLE_intf")]
+    if len(vrfs) != len(groups):
         raise ParseError(
-            f"{SHOW_IP_INTERFACE!r} lists {len(vrfs)} VRF entries for {len(interfaces)} "
-            "interfaces; can't tell which VRF each interface is in"
+            f"{SHOW_IP_INTERFACE!r} lists {len(vrfs)} VRF entries for {len(groups)} "
+            "interface entries; can't tell which VRF each interface is in"
         )
+    pairs = [(vrf, row) for vrf, group in zip(vrfs, groups, strict=True) for row in group]
     addresses: list[IPAddress] = []
     seen: set[str] = set()
-    for vrf_row, row in zip(vrfs, interfaces, strict=True):
+    for vrf_row, row in pairs:
         name = text(row, "intf-name")
         vrf = text(vrf_row, "vrf-name-out")
         if not name or not vrf:
@@ -323,6 +325,14 @@ def _entries(data: dict[str, Any], table: str) -> list[dict[str, Any]]:
     if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
         raise ParseError(f"{SHOW_IP_INTERFACE!r} output: {table} is not a list of objects")
     return entries
+
+
+def _row_list(entry: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = entry.get(key)
+    items = [value] if isinstance(value, dict) else value
+    if not isinstance(items, list) or not items or not all(isinstance(i, dict) for i in items):
+        raise ParseError(f"{SHOW_IP_INTERFACE!r} output: an entry has no {key} objects")
+    return items
 
 
 def _only_row(entry: dict[str, Any], key: str) -> dict[str, Any]:

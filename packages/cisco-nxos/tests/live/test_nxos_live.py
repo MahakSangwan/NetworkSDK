@@ -259,7 +259,14 @@ def test_ip_interface_layout(shared: CiscoNXOS) -> None:
         print(f"{table}: {_shape(entries)}")
         items = entries if isinstance(entries, list) else [entries] if entries else []
         print(f"  entry keys: {sorted({k for e in items if isinstance(e, dict) for k in e})}")
-        rows_ = [r for e in items if isinstance(e, dict) for r in e.values() if isinstance(r, dict)]
+        row_values = [v for e in items if isinstance(e, dict) for v in e.values()]
+        print(f"  row value per entry: {[_shape(v) for v in row_values]}")
+        rows_ = [
+            r
+            for v in row_values
+            for r in (v if isinstance(v, list) else [v])
+            if isinstance(r, dict)
+        ]
         print(f"  row keys: {sorted({k for r in rows_ for k in r})}")
         nested = {k: _shape(r[k]) for r in rows_ for k in r if isinstance(r[k], dict | list)}
         print(f"  nested in rows: {nested or '-'}")
