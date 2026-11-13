@@ -257,24 +257,39 @@ _DEFAULT_VRF = "default"
 def parse_show_ip_interface(output: str) -> list[IPAddress]:
     """One record per IPv4 address: each interface's primary, then its secondaries.
 
-    NX-OS prints two parallel lists (D40): entry N of TABLE_vrf is one VRF,
-    entry N of TABLE_intf holds that VRF's interfaces (one object, or a list).
-    They are paired by position only when their lengths match.
+    NX-OS prints the VRF in one of two layouts (D40):
+    - in each interface row (`vrf-name-out`), with no TABLE_vrf (live);
+    - as a parallel TABLE_vrf: entry N is one VRF, entry N of TABLE_intf holds
+      that VRF's interfaces (one object or a list). Paired by position only
+      when their lengths match.
     """
     data = parse_json(SHOW_IP_INTERFACE, output)
-    vrfs = [_only_row(entry, "ROW_vrf") for entry in _entries(data, "TABLE_vrf")]
     groups = [_row_list(entry, "ROW_intf") for entry in _entries(data, "TABLE_intf")]
-    if len(vrfs) != len(groups):
-        raise ParseError(
-            f"{SHOW_IP_INTERFACE!r} lists {len(vrfs)} VRF entries for {len(groups)} "
-            "interface entries; can't tell which VRF each interface is in"
-        )
-    pairs = [(vrf, row) for vrf, group in zip(vrfs, groups, strict=True) for row in group]
+    pairs: list[tuple[str | None, dict[str, Any]]]
+    if "TABLE_vrf" in data:
+        vrfs = [_only_row(entry, "ROW_vrf") for entry in _entries(data, "TABLE_vrf")]
+        if len(vrfs) != len(groups):
+            raise ParseError(
+                f"{SHOW_IP_INTERFACE!r} lists {len(vrfs)} VRF entries for {len(groups)} "
+                "interface entries; can't tell which VRF each interface is in"
+            )
+        pairs = []
+        for vrf_row, group in zip(vrfs, groups, strict=True):
+            vrf = text(vrf_row, "vrf-name-out")
+            for row in group:
+                own = text(row, "vrf-name-out")
+                if own is not None and own != vrf:
+                    raise ParseError(
+                        f"{SHOW_IP_INTERFACE!r}: {text(row, 'intf-name')} is paired with one VRF "
+                        "but names another"
+                    )
+                pairs.append((vrf, row))
+    else:
+        pairs = [(text(row, "vrf-name-out"), row) for group in groups for row in group]
     addresses: list[IPAddress] = []
     seen: set[str] = set()
-    for vrf_row, row in pairs:
+    for vrf, row in pairs:
         name = text(row, "intf-name")
-        vrf = text(vrf_row, "vrf-name-out")
         if not name or not vrf:
             raise ParseError(f"{SHOW_IP_INTERFACE!r} has an entry without interface or VRF name")
         if name in seen:
