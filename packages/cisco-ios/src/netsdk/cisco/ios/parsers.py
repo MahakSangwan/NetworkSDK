@@ -175,10 +175,16 @@ def _duplex(name: str, text: str) -> Duplex | None:
 # -- show ip interface -------------------------------------------------------
 
 
+#: Released ntc-templates reads a tunnel's transport VRF ("Tunnel VPN
+#: Routing/Forwarding") as the interface VRF; delete with the file once a
+#: release has networktocode/ntc-templates#2378 (D37).
+_IP_INTERFACE_TEMPLATE = Path(__file__).parent / "templates" / "cisco_ios_show_ip_interface.textfsm"
+
+
 def parse_show_ip_interface(output: str) -> list[IPAddress]:
     """One record per address. IOS lists the primary first, then secondaries."""
     addresses: list[IPAddress] = []
-    for row in parse_textfsm(PLATFORM, SHOW_IP_INTERFACE, output):
+    for row in parse_textfsm(PLATFORM, SHOW_IP_INTERFACE, output, template=_IP_INTERFACE_TEMPLATE):
         name = row["interface"]
         for index, (ip, prefix) in enumerate(
             zip(row["ip_address"], row["prefix_length"], strict=True)

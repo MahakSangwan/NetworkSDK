@@ -9,7 +9,8 @@ from netsdk.cisco.ios.parsers import parse_show_ip_interface
 from netsdk.core import Credentials, IPAddress, ParseError, SupportsIPAddresses
 from netsdk.core.testing import FakeCLI, FakeConnection
 
-UPSTREAM = Path(__file__).parent / "fixtures" / "show_ip_interface" / "ntc_templates"
+FIXTURES = Path(__file__).parent / "fixtures" / "show_ip_interface"
+UPSTREAM = FIXTURES / "ntc_templates"
 
 CREDS = Credentials(username="ro", password="pw")
 
@@ -49,7 +50,8 @@ def test_hand_written_sample() -> None:
 @pytest.mark.parametrize(
     ("name", "count", "secondaries", "in_a_vrf"),
     [
-        ("cisco_ios_show_ip_interface", 58, 0, 33),
+        # 5 tunnels print only a transport VRF ("Tunnel VPN ..."): global (D37).
+        ("cisco_ios_show_ip_interface", 58, 0, 28),
         ("cisco_ios_show_ip_interface2", 6, 1, 0),
         ("cisco_ios_show_ip_interface3", 1, 0, 0),
         ("cisco_ios_show_ip_interface4", 2, 0, 0),
@@ -85,6 +87,32 @@ def test_upstream_values_match_the_raw_text() -> None:
     sample1 = parse_show_ip_interface(read("cisco_ios_show_ip_interface"))
     mgmt = next(a for a in sample1 if a.interface == "GigabitEthernet0")
     assert (str(mgmt.address), mgmt.vrf) == ("172.21.2.3/24", "Mgmt-intf")
+    # 'Tunnel VPN Routing/Forwarding "MYCOMPANY"' is the transport VRF; the
+    # tunnel's own address is in the global table.
+    tunnels = {a.interface: a for a in sample1 if a.interface.startswith("Tunnel")}
+    assert sorted(tunnels) == ["Tunnel5001", "Tunnel5002", "Tunnel5010", "Tunnel6001", "Tunnel6002"]
+    assert {a.vrf for a in tunnels.values()} == {None}
+    assert str(tunnels["Tunnel5001"].address) == "169.254.64.0/31"
+
+
+def test_tunnel_transport_vrf_is_not_the_interface_vrf() -> None:
+    text = (FIXTURES / "netsdk" / "cisco_ios_show_ip_interface_tunnel_vrf.raw").read_text()
+    assert [(a.interface, str(a.address), a.vrf) for a in parse_show_ip_interface(text)] == [
+        ("GigabitEthernet0/0/0", "198.51.100.1/30", "UNDERLAY"),
+        ("Tunnel100", "192.0.2.1/24", None),  # global, tunnel vrf UNDERLAY
+        ("Tunnel200", "192.0.2.129/25", "OVERLAY"),  # tunnel vrf UNDERLAY
+    ]
+
+
+def test_released_template_still_reads_the_transport_vrf() -> None:
+    # Why the corrected copy exists. When this fails, a released ntc-templates
+    # has networktocode/ntc-templates#2378: delete the copy (D37).
+    from ntc_templates.parse import parse_output
+
+    rows = parse_output(
+        platform="cisco_ios", command="show ip interface", data=read("cisco_ios_show_ip_interface")
+    )
+    assert next(r for r in rows if r["interface"] == "Tunnel5001")["vrf"] == "MYCOMPANY"
 
 
 @pytest.mark.parametrize(
