@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -34,9 +34,12 @@ from pydantic import SecretStr
 from netsdk.cisco.nxos import CiscoNXOS
 from netsdk.cisco.nxos.commands import (
     SHOW_INTERFACE,
+    SHOW_INTERFACE_SWITCHPORT,
+    SHOW_INTERFACE_TRUNK,
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
+    SHOW_VLAN_BRIEF,
 )
 from netsdk.cisco.nxos.parsers import rows, text
 from netsdk.core import (
@@ -332,6 +335,76 @@ def test_get_ip_addresses(shared: CiscoNXOS) -> None:
             print(f"  {side}: {count} in {where}")
     assert not only_ours, "get_ip_addresses() has VRF/address pairs the brief text lacks"
     assert not only_brief, "the brief text has VRF/address pairs get_ip_addresses() lacks"
+
+
+# -- layout probes (slice 4) ---------------------------------------------------
+
+#: Fields whose values are printed: modes and states, never names or numbers.
+_ENUM_KEY = re.compile(r"mode|state|status|switchport|encap|negotiat|monitor|proto", re.I)
+_NOT_ENUM_KEY = re.compile(r"name|desc", re.I)
+_KINDS = [
+    ("empty", re.compile(r"")),
+    ("number", re.compile(r"\d+")),
+    ("vlan list", re.compile(r"\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)+|\d+-\d+")),
+    ("interface name", re.compile(r"[A-Za-z][A-Za-z-]*\d[\d/.:]*")),
+    (
+        "interface list",
+        re.compile(r"[A-Za-z][A-Za-z-]*\d[\d/.:-]*(?:\s*,\s*[A-Za-z][A-Za-z-]*\d[\d/.:-]*)+"),
+    ),
+    ("word", re.compile(r"[A-Za-z][A-Za-z ()-]{0,30}")),
+]
+
+
+def _kind(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return repr(value)
+    if isinstance(value, int | float):
+        return "int"
+    if not isinstance(value, str):
+        return type(value).__name__
+    for kind, pattern in _KINDS:
+        if pattern.fullmatch(value.strip()):
+            if kind.startswith("interface") and re.search(r"\d-\d", value):
+                return kind + " with ranges"
+            return kind
+    return "text"
+
+
+def _walk(
+    value: Any, path: str, kinds: dict[str, Counter[str]], enums: dict[str, set[str]]
+) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _walk(item, f"{path}.{key}" if path else key, kinds, enums)
+    elif isinstance(value, list):
+        kinds[path][f"list of {len(value)}"] += 1
+        for item in value:
+            _walk(item, path + "[]", kinds, enums)
+    else:
+        kind = _kind(value)
+        kinds[path][kind] += 1
+        key = path.rsplit(".", 1)[-1]
+        if kind == "word" and _ENUM_KEY.search(key) and not _NOT_ENUM_KEY.search(key):
+            enums.setdefault(path, set()).add(value)
+
+
+@needs_device
+@pytest.mark.parametrize(
+    "command", [SHOW_VLAN_BRIEF, SHOW_INTERFACE_SWITCHPORT, SHOW_INTERFACE_TRUNK]
+)
+def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
+    # Field paths and value kinds only; values only for mode/state fields.
+    output = shared.send_command(command)
+    data = parse_json(command, output)
+    kinds: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    enums: dict[str, set[str]] = {}
+    _walk(data, "", kinds, enums)
+    print(f"\n{command!r}: {len(output.splitlines())} line(s)")
+    for path, counter in sorted(kinds.items()):
+        summary = ", ".join(f"{kind} x{n}" for kind, n in counter.most_common())
+        print(f"  {path}: {summary}")
+        if path in enums:
+            print(f"    values: {sorted(enums[path])}")
 
 
 @needs_device
