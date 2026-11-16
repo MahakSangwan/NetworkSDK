@@ -10,17 +10,19 @@ import logging
 import re
 from datetime import timedelta
 from ipaddress import IPv4Interface
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from netsdk.cisco.nxos.commands import (
     SHOW_INTERFACE,
+    SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
+    SHOW_VLAN_BRIEF,
 )
-from netsdk.cisco.nxos.models import NXOSFacts, NXOSInterface
+from netsdk.cisco.nxos.models import NXOSVLAN, NXOSFacts, NXOSInterface, NXOSSwitchport
 from netsdk.core import Duplex, IPAddress, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import parse_json
@@ -355,3 +357,166 @@ def _only_row(entry: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ParseError(f"{SHOW_IP_INTERFACE!r} output: an entry has no single {key}")
     return row
+
+
+# -- show interface switchport (D41) ----------------------------------------
+
+#: NX-OS prints this for a trunk with no `allowed vlan` restriction (and for
+#: an explicit `allowed vlan 1-4094`); reported as all_vlans_allowed (D41).
+_ALL_VLANS = "1-4094"
+_SWITCHPORT_MODES: dict[str, Literal["access", "trunk"]] = {"access": "access", "trunk": "trunk"}
+_NO_VLAN = {"none", "0"}
+
+
+def vlan_ids(value: str) -> tuple[int, ...]:
+    """Expand an NX-OS VLAN list ("1-5,7,10-12") into sorted, unique IDs."""
+    ids: set[int] = set()
+    for part in value.replace(" ", "").split(","):
+        low, dash, high = part.partition("-")
+        if not low.isdigit() or (dash and not high.isdigit()):
+            raise ValueError(f"not a VLAN list: {value!r}")
+        first, last = int(low), int(high) if dash else int(low)
+        if not 1 <= first <= last <= 4094:
+            raise ValueError(f"not a VLAN list: {value!r}")
+        ids.update(range(first, last + 1))
+    return tuple(sorted(ids))
+
+
+def parse_show_interface_switchport(output: str) -> list[NXOSSwitchport]:
+    data = parse_json(SHOW_INTERFACE_SWITCHPORT, output)
+    ports = []
+    for row in rows(data, "TABLE_interface", "ROW_interface", SHOW_INTERFACE_SWITCHPORT):
+        name = text(row, "interface")
+        if not name:
+            raise ParseError(f"{SHOW_INTERFACE_SWITCHPORT!r} has an interface without a name")
+        enabled = text(row, "switchport")
+        if enabled == "Disabled":
+            continue  # routed port
+        if enabled != "Enabled":
+            raise ParseError(f"{SHOW_INTERFACE_SWITCHPORT!r}: {name} switchport is {enabled!r}")
+        oper = text(row, "oper_mode")
+        all_allowed, allowed = _allowed_vlans(name, text(row, "trunk_vlans"))
+        try:
+            ports.append(
+                NXOSSwitchport(
+                    interface=name,
+                    mode=_SWITCHPORT_MODES.get(oper) if oper else None,
+                    access_vlan=_switchport_vlan(name, row, "access_vlan"),
+                    native_vlan=_switchport_vlan(name, row, "native_vlan"),
+                    all_vlans_allowed=all_allowed,
+                    allowed_vlans=allowed,
+                    oper_mode=oper,
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_INTERFACE_SWITCHPORT!r} value for {name}: {exc}"
+            ) from exc
+    names = [p.interface for p in ports]
+    if len(set(names)) != len(names):
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        raise ParseError(
+            f"{SHOW_INTERFACE_SWITCHPORT!r} lists {', '.join(duplicates)} more than once"
+        )
+    return ports
+
+
+def _switchport_vlan(name: str, row: dict[str, Any], key: str) -> int | None:
+    value = text(row, key)
+    if value is None or value.lower() in _NO_VLAN:
+        return None
+    if not value.isdigit():
+        raise ParseError(f"{SHOW_INTERFACE_SWITCHPORT!r}: {name} {key} is {value!r}")
+    return int(value)
+
+
+def _allowed_vlans(name: str, value: str | None) -> tuple[bool, tuple[int, ...] | None]:
+    if value is None:
+        return False, None
+    if value.replace(" ", "") == _ALL_VLANS:
+        return True, None
+    if value.lower() == "none":
+        return False, ()
+    try:
+        return False, vlan_ids(value)
+    except ValueError as exc:
+        raise ParseError(
+            f"{SHOW_INTERFACE_SWITCHPORT!r}: unreadable allowed VLANs {value!r} on {name}"
+        ) from exc
+
+
+# -- show vlan brief (D41) ---------------------------------------------------
+
+# "Ethernet1/6-10", "port-channel10-13", "Ethernet101/1/1-4": a range in the
+# last number of the name.
+_PORT_RANGE = re.compile(r"(.*?)(\d+)-(\d+)")
+
+
+def parse_show_vlan_brief(show_vlan_brief: str, show_interface_switchport: str) -> list[NXOSVLAN]:
+    """VLANs with their access ports only.
+
+    NX-OS lists trunk ports under every VLAN they carry; a port stays only if
+    `show interface switchport` says it is an access port in that VLAN.
+    """
+    data = parse_json(SHOW_VLAN_BRIEF, show_vlan_brief)
+    access = {
+        p.interface: p.access_vlan
+        for p in parse_show_interface_switchport(show_interface_switchport)
+        if p.mode == "access"
+    }
+    vlans = []
+    for row in rows(data, "TABLE_vlanbriefxbrief", "ROW_vlanbriefxbrief", SHOW_VLAN_BRIEF):
+        # The -utf ID is the right one where both exist: some releases print
+        # a garbled plain ID next to it (NAPALM issue 1490).
+        raw_id = text(row, "vlanshowbr-vlanid-utf") or text(row, "vlanshowbr-vlanid")
+        if raw_id is None or not raw_id.isdigit():
+            raise ParseError(f"{SHOW_VLAN_BRIEF!r} has a VLAN without a readable ID: {raw_id!r}")
+        vlan_id = int(raw_id)
+        status = text(row, "vlanshowbr-vlanstate")
+        if status is None:
+            raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} has no state")
+        shut = text(row, "vlanshowbr-shutstate")
+        ports = vlan_ports(vlan_id, row.get("vlanshowplist-ifidx"))
+        try:
+            vlans.append(
+                NXOSVLAN(
+                    vlan_id=vlan_id,
+                    name=text(row, "vlanshowbr-vlanname"),
+                    active=status == "active" and shut in (None, "noshutdown"),
+                    interfaces=tuple(p for p in ports if access.get(p) == vlan_id),
+                    status=status,
+                    shut_state=shut,
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_VLAN_BRIEF!r} value for VLAN {vlan_id}: {exc}"
+            ) from exc
+    ids = [v.vlan_id for v in vlans]
+    if len(set(ids)) != len(ids):
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        raise ParseError(f"{SHOW_VLAN_BRIEF!r} lists VLAN {duplicates} more than once")
+    return vlans
+
+
+def vlan_ports(vlan_id: int, value: Any) -> list[str]:
+    """The port list as printed: a string or a list of strings, with ranges."""
+    if value is None:
+        return []
+    parts = [value] if isinstance(value, str) else value
+    if not isinstance(parts, list) or not all(isinstance(p, str) for p in parts):
+        raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} ports are {value!r}")
+    ports: list[str] = []
+    for item in ",".join(parts).split(","):
+        item = item.strip()
+        if not item:
+            continue
+        match = _PORT_RANGE.fullmatch(item)
+        if match is None:
+            ports.append(item)
+            continue
+        prefix, first, last = match[1], int(match[2]), int(match[3])
+        if not prefix or first > last:
+            raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} has an unreadable port {item!r}")
+        ports.extend(f"{prefix}{n}" for n in range(first, last + 1))
+    return ports

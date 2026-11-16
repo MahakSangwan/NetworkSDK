@@ -8,12 +8,20 @@ from typing import ClassVar
 
 from netsdk.cisco.nxos.commands import (
     SHOW_INTERFACE,
+    SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
+    SHOW_VLAN_BRIEF,
 )
-from netsdk.cisco.nxos.models import NXOSFacts, NXOSInterface
-from netsdk.cisco.nxos.parsers import parse_facts, parse_show_interface, parse_show_ip_interface
+from netsdk.cisco.nxos.models import NXOSVLAN, NXOSFacts, NXOSInterface, NXOSSwitchport
+from netsdk.cisco.nxos.parsers import (
+    parse_facts,
+    parse_show_interface,
+    parse_show_interface_switchport,
+    parse_show_ip_interface,
+    parse_show_vlan_brief,
+)
 from netsdk.cisco.nxos.transport import NXOSSSHTransport
 from netsdk.core import Credentials, Device, DeviceConnectionError, IPAddress, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
@@ -132,6 +140,28 @@ class CiscoNXOS(Device):
 
     def get_ip_addresses_raw(self) -> dict[str, str]:
         return {SHOW_IP_INTERFACE: self.send_command(SHOW_IP_INTERFACE)}
+
+    def get_vlans(self) -> list[NXOSVLAN]:
+        """VLANs with name, state and access ports (trunk ports: get_switchports())."""
+        raw = self.get_vlans_raw()
+        with self._attributed():
+            return parse_show_vlan_brief(raw[SHOW_VLAN_BRIEF], raw[SHOW_INTERFACE_SWITCHPORT])
+
+    def get_vlans_raw(self) -> dict[str, str]:
+        """`show vlan brief`, and `show interface switchport` to tell access ports (D41)."""
+        return {
+            command: self.send_command(command)
+            for command in (SHOW_VLAN_BRIEF, SHOW_INTERFACE_SWITCHPORT)
+        }
+
+    def get_switchports(self) -> list[NXOSSwitchport]:
+        """Layer-2 ports: mode, access/native VLAN and allowed VLANs (1-4094 is "all")."""
+        raw = self.get_switchports_raw()
+        with self._attributed():
+            return parse_show_interface_switchport(raw[SHOW_INTERFACE_SWITCHPORT])
+
+    def get_switchports_raw(self) -> dict[str, str]:
+        return {SHOW_INTERFACE_SWITCHPORT: self.send_command(SHOW_INTERFACE_SWITCHPORT)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

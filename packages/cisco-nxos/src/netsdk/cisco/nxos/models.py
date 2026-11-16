@@ -1,6 +1,6 @@
 """NX-OS models: core models plus what NX-OS reports on top."""
 
-from netsdk.core import Facts, Interface, MacAddress
+from netsdk.core import VLAN, Facts, Interface, MacAddress, Switchport
 
 
 class NXOSFacts(Facts):
@@ -31,3 +31,24 @@ class NXOSInterface(Interface):
     bandwidth: int | None = None
     #: As printed: "access", "trunk", "routed", "fex-fabric", ...; None on SVIs.
     port_mode: str | None = None
+
+
+class NXOSVLAN(VLAN):
+    """VLAN plus its NX-OS state strings.
+
+    `interfaces` are access ports only (D41): NX-OS lists trunk ports under
+    each VLAN too, which are filtered out with `show interface switchport`.
+    """
+
+    #: As printed: "active", "suspend", ...
+    status: str
+    #: As printed: "noshutdown", "shutdown"; None when not printed.
+    shut_state: str | None = None
+
+
+class NXOSSwitchport(Switchport):
+    """Switchport plus what NX-OS `show interface switchport` adds."""
+
+    #: Operational mode as printed: "access", "trunk", "fex-fabric", "down", ...
+    #: NX-OS prints no administrative mode.
+    oper_mode: str | None = None

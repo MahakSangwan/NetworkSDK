@@ -41,7 +41,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
 )
-from netsdk.cisco.nxos.parsers import rows, text
+from netsdk.cisco.nxos.parsers import rows, text, vlan_ids, vlan_ports
 from netsdk.core import (
     AuthenticationError,
     CommandError,
@@ -405,6 +405,90 @@ def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
         print(f"  {path}: {summary}")
         if path in enums:
             print(f"    values: {sorted(enums[path])}")
+
+
+@needs_device
+def test_get_vlans(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        vlans = shared.get_vlans()
+    # No VLAN names: this output gets pasted back for review.
+    print(f"\n{len(vlans)} VLANs")
+    print(f"{'id':>5} {'active':<6} {'status':<10} {'shut':<11} access ports")
+    for v in vlans:
+        shut = v.shut_state or "-"
+        print(f"{v.vlan_id:>5} {v.active!s:<6} {v.status:<10} {shut:<11} {len(v.interfaces)}")
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    # Reported, not asserted: ports NX-OS listed that the access filter
+    # dropped (D41), by their switchport mode.
+    raw = shared.get_vlans_raw()
+    listed = rows(
+        parse_json(SHOW_VLAN_BRIEF, raw[SHOW_VLAN_BRIEF]),
+        "TABLE_vlanbriefxbrief",
+        "ROW_vlanbriefxbrief",
+        SHOW_VLAN_BRIEF,
+    )
+    mode_of = {p.interface: p.oper_mode or "-" for p in shared.get_switchports()}
+    kept = {(v.vlan_id, name) for v in vlans for name in v.interfaces}
+    dropped: Counter[str] = Counter()
+    for row in listed:
+        vid = int(text(row, "vlanshowbr-vlanid-utf") or text(row, "vlanshowbr-vlanid") or 0)
+        for name in vlan_ports(vid, row.get("vlanshowplist-ifidx")):
+            if (vid, name) not in kept:
+                dropped[mode_of.get(name, "not a switchport")] += 1
+    print(f"VLAN/port pairs dropped as not access ports, by mode: {dict(dropped) or 'none'}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted({p for v in vlans for p in v.interfaces} - interface_names)
+    assert not unknown, f"VLAN ports that get_interfaces() doesn't list: {unknown}"
+
+
+def _allowed_as_printed(value: str) -> tuple[int, ...] | str:
+    if value == "1-4094":
+        return "ALL"
+    if value in ("", "none"):
+        return ()
+    return vlan_ids(value)
+
+
+@needs_device
+def test_get_switchports(shared: CiscoNXOS) -> None:
+    ports = shared.get_switchports()
+    print(f"\n{len(ports)} switchports")
+    print(f"{'interface':<22} {'mode':<6} {'oper mode':<12} {'access':>6} {'native':>6} allowed")
+    for p in ports:
+        if p.all_vlans_allowed:
+            allowed = "ALL"
+        elif p.allowed_vlans is None:
+            allowed = "-"
+        else:
+            allowed = f"{len(p.allowed_vlans)} VLANs"
+        print(
+            f"{p.interface:<22} {p.mode or '-':<6} {p.oper_mode or '-':<12} "
+            f"{p.access_vlan or '-':>6} {p.native_vlan or '-':>6} {allowed}"
+        )
+    interface_names = {i.name for i in shared.get_interfaces()}
+    unknown = sorted({p.interface for p in ports} - interface_names)
+    assert not unknown, f"switchports that get_interfaces() doesn't list: {unknown}"
+
+    # Cross-check (D41): each trunk's allowed list against `show interface trunk`.
+    trunk = parse_json(SHOW_INTERFACE_TRUNK, shared.send_command(SHOW_INTERFACE_TRUNK))
+    there: dict[str, str] = {
+        text(r, "interface") or "": text(r, "allowedvlans") or ""
+        for r in rows(trunk, "TABLE_allowed_vlans", "ROW_allowed_vlans", SHOW_INTERFACE_TRUNK)
+    }
+    differ = []
+    for p in ports:
+        if p.interface not in there:
+            continue
+        value = there[p.interface]
+        theirs = _allowed_as_printed(value)
+        ours: tuple[int, ...] | str | None = "ALL" if p.all_vlans_allowed else p.allowed_vlans
+        if ours != theirs:
+            differ.append(p.interface)
+    longest = max((len(v) for v in there.values()), default=0)
+    print(f"trunks in show interface trunk: {len(there)}, longest allowed list {longest} chars")
+    print(f"allowed lists that differ from show interface trunk: {differ or 'none'}")
+    assert not differ
 
 
 @needs_device
