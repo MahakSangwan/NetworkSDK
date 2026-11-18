@@ -472,9 +472,24 @@ def test_get_switchports(shared: CiscoNXOS) -> None:
 
     # Cross-check (D41): each trunk's allowed list against `show interface trunk`.
     trunk = parse_json(SHOW_INTERFACE_TRUNK, shared.send_command(SHOW_INTERFACE_TRUNK))
+    table = trunk.get("TABLE_allowed_vlans")
+    # 9.3/10.5: {ROW_allowed_vlans: [rows]}; 7.3(11)N1(1): a list of
+    # {ROW_allowed_vlans: row}, without interface names (live, 2026-11-18).
+    entries = table if isinstance(table, list) else [table] if isinstance(table, dict) else []
+    allowed_rows = [
+        r
+        for e in entries
+        for v in e.values()
+        for r in (v if isinstance(v, list) else [v])
+        if isinstance(r, dict)
+    ]
+    if allowed_rows and not all("interface" in r for r in allowed_rows):
+        print(
+            "show interface trunk names no interfaces in its allowed-VLAN rows: cross-check skipped"
+        )
+        return
     there: dict[str, str] = {
-        text(r, "interface") or "": text(r, "allowedvlans") or ""
-        for r in rows(trunk, "TABLE_allowed_vlans", "ROW_allowed_vlans", SHOW_INTERFACE_TRUNK)
+        text(r, "interface") or "": text(r, "allowedvlans") or "" for r in allowed_rows
     }
     differ = []
     for p in ports:
