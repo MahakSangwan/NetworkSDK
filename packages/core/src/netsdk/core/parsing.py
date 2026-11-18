@@ -54,7 +54,8 @@ def parse_json(command: str, output: str, *, wrap_width: int | None = None) -> d
     lines = output.split("\n")
     start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("{")), None)
     if start is None:
-        raise ParseError(f"{command!r} output has no JSON object")
+        first = next((line.strip() for line in lines if line.strip()), "")
+        raise ParseError(f"{command!r} output has no JSON object; it starts: {first[:100]!r}")
     before = [line.strip() for line in lines[:start] if line.strip()]
     if before:
         log.info(

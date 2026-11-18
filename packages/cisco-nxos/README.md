@@ -21,6 +21,7 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | `get_ip_addresses()` | `show ip interface vrf all \| json` | One record per IPv4 address (primary, then secondaries) with its VRF; `default` is None. Unnumbered interfaces have none. |
 | `get_vlans()` | `show vlan brief \| json`, `show interface switchport \| json` | Access ports only, taken from `show interface switchport`: NX-OS's own VLAN port lists include trunks and are damaged on 7.3 (D41). |
 | `get_switchports()` | `show interface switchport \| json` | Layer-2 ports: mode, access/native VLAN, allowed VLANs; `1-4094` is `all_vlans_allowed`. |
+| `get_vtp_status()` | `show vtp status \| json` | Version, mode, domain, revision, pruning, traps, MD5 digest. `NotSupportedError` when VTP is off. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
 Sessions use a 255-column terminal: on a wider one NX-OS 7.3 cuts lines at

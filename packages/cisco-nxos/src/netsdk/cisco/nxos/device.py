@@ -13,17 +13,33 @@ from netsdk.cisco.nxos.commands import (
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VTP_STATUS,
 )
-from netsdk.cisco.nxos.models import NXOSVLAN, NXOSFacts, NXOSInterface, NXOSSwitchport
+from netsdk.cisco.nxos.models import (
+    NXOSVLAN,
+    NXOSFacts,
+    NXOSInterface,
+    NXOSSwitchport,
+    NXOSVTPStatus,
+)
 from netsdk.cisco.nxos.parsers import (
     parse_facts,
     parse_show_interface,
     parse_show_interface_switchport,
     parse_show_ip_interface,
     parse_show_vlan_brief,
+    parse_show_vtp_status,
 )
 from netsdk.cisco.nxos.transport import NXOS_TERMINAL_WIDTH, NXOSSSHTransport
-from netsdk.core import Credentials, Device, DeviceConnectionError, IPAddress, NetSDKError
+from netsdk.core import (
+    CommandError,
+    Credentials,
+    Device,
+    DeviceConnectionError,
+    IPAddress,
+    NetSDKError,
+    NotSupportedError,
+)
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
 from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
@@ -169,6 +185,31 @@ class CiscoNXOS(Device):
 
     def get_switchports_raw(self) -> dict[str, str]:
         return {SHOW_INTERFACE_SWITCHPORT: self.send_command(SHOW_INTERFACE_SWITCHPORT)}
+
+    def get_vtp_status(self) -> NXOSVTPStatus:
+        """VTP version, domain, mode, revision, pruning and MD5 digest.
+
+        Raises NotSupportedError when the switch rejects the command
+        (`feature vtp` not enabled).
+        """
+        raw = self.get_vtp_status_raw()
+        with self._attributed():
+            return parse_show_vtp_status(raw[SHOW_VTP_STATUS], wrap_width=self.terminal_width)
+
+    def get_vtp_status_raw(self) -> dict[str, str]:
+        return {SHOW_VTP_STATUS: self._send_if_supported(SHOW_VTP_STATUS, "VTP is not enabled")}
+
+    def _send_if_supported(self, command: str, reason: str) -> str:
+        try:
+            return self.send_command(command)
+        except CommandError as exc:
+            # Only "% Invalid command" (the command doesn't exist without its
+            # feature); an authorization failure stays an error.
+            if exc.output and "% Invalid command" in exc.output:
+                raise NotSupportedError(
+                    f"{command!r} is not available: {reason}", host=self.host
+                ) from exc
+            raise
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

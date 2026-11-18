@@ -1,6 +1,11 @@
 """NX-OS models: core models plus what NX-OS reports on top."""
 
-from netsdk.core import VLAN, Facts, Interface, MacAddress, Switchport
+from ipaddress import IPv4Address
+from typing import Literal
+
+from pydantic import Field
+
+from netsdk.core import VLAN, Facts, Interface, MacAddress, NetSDKModel, Switchport
 
 
 class NXOSFacts(Facts):
@@ -52,3 +57,42 @@ class NXOSSwitchport(Switchport):
     #: Operational mode as printed: "access", "trunk", "fex-fabric", "down", ...
     #: NX-OS prints no administrative mode.
     oper_mode: str | None = None
+
+
+VTPMode = Literal["server", "client", "transparent", "off"]
+
+
+class NXOSVTPStatus(NetSDKModel):
+    """VTP state from NX-OS `show vtp status` (D43).
+
+    Cisco-only, so it has no core model; field names follow `IOSVTPStatus` in
+    the IOS package where the meaning is the same.
+    """
+
+    #: VTP version running (`running-version`).
+    version: int = Field(ge=1, le=3)
+    #: VTP version configured (`version`).
+    configured_version: int | None = Field(default=None, ge=1, le=3)
+    #: None when no domain is set.
+    domain_name: str | None = None
+    mode: VTPMode
+    configuration_revision: int = Field(ge=0)
+    #: Number of existing VLANs.
+    vlan_count: int = Field(ge=0)
+    #: Maximum VLANs supported locally.
+    max_vlans: int | None = Field(default=None, ge=0)
+    pruning_enabled: bool
+    #: Pruning in effect (`oper_pruning_mode`).
+    oper_pruning_enabled: bool | None = None
+    traps_enabled: bool
+    v2_mode_enabled: bool | None = None
+    #: As printed, e.g. "0x9A 0x3C ...": usable to compare switches in a domain.
+    md5_digest: str | None = None
+    #: Who last changed the VLAN database; None when printed as 0.0.0.0.
+    last_modified_by: IPv4Address | None = None
+    #: As printed: no timezone, so not converted (D28).
+    last_modified_at: str | None = None
+    #: The address this switch sends updates from; None when 0.0.0.0.
+    updater_id: IPv4Address | None = None
+    #: As printed, e.g. why no updater address was chosen.
+    updater_reason: str | None = None

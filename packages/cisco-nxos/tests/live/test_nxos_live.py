@@ -49,6 +49,7 @@ from netsdk.core import (
     Credentials,
     DeviceConnectionError,
     IPAddress,
+    NotSupportedError,
 )
 from netsdk.core.parsing import Damaged, parse_json
 
@@ -534,6 +535,22 @@ def test_get_switchports(shared: CiscoNXOS) -> None:
     print(f"trunks in show interface trunk: {len(there)}, longest allowed list {longest} chars")
     print(f"allowed lists that differ from show interface trunk: {differ or 'none'}")
     assert not differ
+
+
+@needs_device
+def test_get_vtp_status(shared: CiscoNXOS) -> None:
+    try:
+        vtp = shared.get_vtp_status()
+    except NotSupportedError as exc:
+        pytest.skip(f"no VTP: {exc}")
+    # No domain name or addresses: this output gets pasted back for review.
+    shown = vtp.model_dump(exclude={"domain_name", "last_modified_by", "updater_id", "md5_digest"})
+    print("\n" + "\n".join(f"{name}: {value}" for name, value in shown.items()))
+    for name in ("domain_name", "last_modified_by", "updater_id", "md5_digest"):
+        print(f"{name}: {'set' if getattr(vtp, name) is not None else 'None'}")
+    # Reported, not asserted: VTP's VLAN count against get_vlans().
+    print(f"vlan_count {vtp.vlan_count}, get_vlans() {len(shared.get_vlans())}")
+    assert vtp.mode
 
 
 @needs_device

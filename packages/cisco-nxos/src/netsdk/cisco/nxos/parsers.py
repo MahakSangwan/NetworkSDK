@@ -9,7 +9,7 @@ understand. Raised errors carry no host; the device adds it.
 import logging
 import re
 from datetime import timedelta
-from ipaddress import IPv4Interface
+from ipaddress import AddressValueError, IPv4Address, IPv4Interface
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -21,8 +21,15 @@ from netsdk.cisco.nxos.commands import (
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VTP_STATUS,
 )
-from netsdk.cisco.nxos.models import NXOSVLAN, NXOSFacts, NXOSInterface, NXOSSwitchport
+from netsdk.cisco.nxos.models import (
+    NXOSVLAN,
+    NXOSFacts,
+    NXOSInterface,
+    NXOSSwitchport,
+    NXOSVTPStatus,
+)
 from netsdk.core import Duplex, IPAddress, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import Damaged, parse_json
@@ -503,3 +510,72 @@ def parse_show_vlan_brief(
     if orphans:
         log.info("access ports in VLANs that don't exist: %s", orphans)
     return vlans
+
+
+# -- show vtp status (D43) ---------------------------------------------------
+
+_ENABLED = {"enabled": True, "disabled": False}
+_NO_ADDRESS = IPv4Address("0.0.0.0")
+
+
+def parse_show_vtp_status(output: str, *, wrap_width: int | None = None) -> NXOSVTPStatus:
+    data = parse_json(SHOW_VTP_STATUS, output, wrap_width=wrap_width)
+    try:
+        return NXOSVTPStatus(
+            version=_vtp_int(data, "running-version", required=True),
+            configured_version=_vtp_int(data, "version"),
+            domain_name=text(data, "domain_name"),
+            mode=_vtp_required(data, "oper_mode"),
+            configuration_revision=_vtp_int(data, "config_rev", required=True),
+            vlan_count=_vtp_int(data, "num_current_vlans", required=True),
+            max_vlans=_vtp_int(data, "max_vlan_supported_local"),
+            pruning_enabled=_vtp_flag(data, "pruning_mode", required=True),
+            oper_pruning_enabled=_vtp_flag(data, "oper_pruning_mode"),
+            traps_enabled=_vtp_flag(data, "trap_enabled", required=True),
+            v2_mode_enabled=_vtp_flag(data, "v2_mode"),
+            md5_digest=text(data, "md5_digest"),
+            last_modified_by=_vtp_address(data, "last_modified_ip"),
+            last_modified_at=text(data, "last_modified_time"),
+            updater_id=_vtp_address(data, "updater_id"),
+            updater_reason=text(data, "updater_reason"),
+        )
+    except ValidationError as exc:
+        raise ParseError(f"unexpected {SHOW_VTP_STATUS!r} value: {exc}") from exc
+
+
+def _vtp_required(data: dict[str, Any], key: str) -> str:
+    value = text(data, key)
+    if value is None:
+        raise ParseError(f"{SHOW_VTP_STATUS!r} output has no {key}")
+    return value
+
+
+def _vtp_int(data: dict[str, Any], key: str, *, required: bool = False) -> int | None:
+    value = text(data, key)
+    if value is None:
+        if required:
+            raise ParseError(f"{SHOW_VTP_STATUS!r} output has no {key}")
+        return None
+    if not value.isdigit():
+        raise ParseError(f"{SHOW_VTP_STATUS!r}: {key} is {value!r}, not a number")
+    return int(value)
+
+
+def _vtp_flag(data: dict[str, Any], key: str, *, required: bool = False) -> bool | None:
+    value = text(data, key)
+    if value is None and not required:
+        return None
+    if value is None or value.lower() not in _ENABLED:
+        raise ParseError(f"{SHOW_VTP_STATUS!r}: {key} is {value!r}, not enabled or disabled")
+    return _ENABLED[value.lower()]
+
+
+def _vtp_address(data: dict[str, Any], key: str) -> IPv4Address | None:
+    value = text(data, key)
+    if value is None:
+        return None
+    try:
+        address = IPv4Address(value)
+    except AddressValueError as exc:
+        raise ParseError(f"{SHOW_VTP_STATUS!r}: {key} is not an IPv4 address") from exc
+    return None if address == _NO_ADDRESS else address
