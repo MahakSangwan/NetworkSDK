@@ -197,7 +197,8 @@ class CiscoNXOS(Device):
             return parse_show_vtp_status(raw[SHOW_VTP_STATUS], wrap_width=self.terminal_width)
 
     def get_vtp_status_raw(self) -> dict[str, str]:
-        return {SHOW_VTP_STATUS: self._send_if_supported(SHOW_VTP_STATUS, "VTP is not enabled")}
+        reason = "VTP is not enabled, or this release has no JSON for it"
+        return {SHOW_VTP_STATUS: self._send_if_supported(SHOW_VTP_STATUS, reason)}
 
     def _send_if_supported(self, command: str, reason: str) -> str:
         try:

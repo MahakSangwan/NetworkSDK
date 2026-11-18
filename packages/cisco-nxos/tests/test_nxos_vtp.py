@@ -180,7 +180,7 @@ def test_vtp_off_is_not_supported(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     conn = rejecting("                 ^\r\n% Invalid command at '^' marker.\r\n")
     with (
         make_device(monkeypatch, tmp_path, conn) as device,
-        pytest.raises(NotSupportedError, match="VTP is not enabled"),
+        pytest.raises(NotSupportedError, match="VTP is not enabled, or this release has no JSON"),
     ):
         device.get_vtp_status()
 

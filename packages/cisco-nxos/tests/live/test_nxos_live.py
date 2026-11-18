@@ -399,7 +399,18 @@ def _walk(
 )
 def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
     # Field paths and value kinds only; values only for mode/state fields.
-    output = shared.send_command(command)
+    try:
+        output = shared.send_command(command)
+    except CommandError as exc:
+        # Rejected: is it the `| json` or the command itself? Only whether the
+        # plain command is accepted is printed, not its output.
+        plain = command.removesuffix(" | json")
+        try:
+            shared.send_command(plain)
+            verdict = f"{plain!r} is accepted: this release has no `| json` for it"
+        except CommandError:
+            verdict = f"{plain!r} is rejected too: the feature is off (or the command unknown)"
+        pytest.skip(f"{command!r} rejected ({exc}); {verdict}")
     data = _json(shared, command, output)
     kinds: defaultdict[str, Counter[str]] = defaultdict(Counter)
     enums: dict[str, set[str]] = {}
