@@ -1,11 +1,20 @@
 """NX-OS models: core models plus what NX-OS reports on top."""
 
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv6Address
 from typing import Literal
 
 from pydantic import Field
 
-from netsdk.core import VLAN, Facts, Interface, MacAddress, NetSDKModel, Switchport
+from netsdk.core import (
+    VLAN,
+    Duplex,
+    Facts,
+    Interface,
+    MacAddress,
+    Neighbor,
+    NetSDKModel,
+    Switchport,
+)
 
 
 class NXOSFacts(Facts):
@@ -96,3 +105,18 @@ class NXOSVTPStatus(NetSDKModel):
     updater_id: IPv4Address | None = None
     #: As printed, e.g. why no updater address was chosen.
     updater_reason: str | None = None
+    #: The interface updates are sent from (7.3 prints it instead of an address).
+    updater_interface: str | None = None
+
+
+class NXOSNeighbor(Neighbor):
+    """Neighbor plus what NX-OS CDP/LLDP detail output adds (D44)."""
+
+    #: CDP addresses the packet came from (`v4addr`).
+    entry_addresses: tuple[IPv4Address | IPv6Address, ...] = ()
+    #: CDP native VLAN, or LLDP port VLAN ID, as the neighbor advertises it.
+    native_vlan: int | None = None
+    #: CDP only.
+    duplex: Duplex | None = None
+    #: CDP `sysname`, next to the device ID NX-OS neighbors put a serial in.
+    remote_system_name: str | None = None

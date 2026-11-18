@@ -9,16 +9,18 @@ understand. Raised errors carry no host; the device adds it.
 import logging
 import re
 from datetime import timedelta
-from ipaddress import AddressValueError, IPv4Address, IPv4Interface
+from ipaddress import AddressValueError, IPv4Address, IPv4Interface, IPv6Address, ip_address
 from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from netsdk.cisco.nxos.commands import (
+    SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACE,
     SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
+    SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
@@ -27,6 +29,7 @@ from netsdk.cisco.nxos.models import (
     NXOSVLAN,
     NXOSFacts,
     NXOSInterface,
+    NXOSNeighbor,
     NXOSSwitchport,
     NXOSVTPStatus,
 )
@@ -538,6 +541,7 @@ def parse_show_vtp_status(output: str, *, wrap_width: int | None = None) -> NXOS
             last_modified_at=text(data, "last_modified_time"),
             updater_id=_vtp_address(data, "updater_id"),
             updater_reason=text(data, "updater_reason"),
+            updater_interface=_local_name(text(data, "updater_interface")),
         )
     except ValidationError as exc:
         raise ParseError(f"unexpected {SHOW_VTP_STATUS!r} value: {exc}") from exc
@@ -580,3 +584,171 @@ def _vtp_address(data: dict[str, Any], key: str) -> IPv4Address | None:
     except AddressValueError as exc:
         raise ParseError(f"{SHOW_VTP_STATUS!r}: {key} is not an IPv4 address") from exc
     return None if address == _NO_ADDRESS else address
+
+
+# -- neighbors: show cdp/lldp neighbors detail (D44) -------------------------
+
+#: NX-OS abbreviations of local interface names, in case a release prints
+#: them short; full names join `Interface.name`.
+_SHORT_NAMES = (("Eth", "Ethernet"), ("Po", "port-channel"), ("Lo", "loopback"))
+#: The legend NX-OS prints with `show lldp neighbors` (same as IOS).
+_LLDP_CAPABILITIES = {
+    "R": "router",
+    "B": "bridge",
+    "T": "telephone",
+    "C": "docsis-cable-device",
+    "W": "wlan-access-point",
+    "P": "repeater",
+    "S": "station",
+    "O": "other",
+}
+#: Printed instead of a management address.
+_NOT_ADVERTISED = {"not advertised", "n/a", ""}
+
+
+def _local_name(name: str | None) -> str | None:
+    if name is None:
+        return None
+    for short, full in _SHORT_NAMES:
+        if re.fullmatch(rf"{short}\d.*", name):
+            return full + name[len(short) :]
+    return name
+
+
+def parse_show_cdp_neighbors_detail(
+    output: str, *, wrap_width: int | None = None
+) -> list[NXOSNeighbor]:
+    """CDP neighbors; empty output (no neighbors) gives none."""
+    if not output.strip():
+        return []
+    data = parse_json(SHOW_CDP_NEIGHBORS_DETAIL, output, wrap_width=wrap_width)
+    table = "TABLE_cdp_neighbor_detail_info"
+    neighbors = []
+    for row in rows(data, table, "ROW_cdp_neighbor_detail_info", SHOW_CDP_NEIGHBORS_DETAIL):
+        local = _local_name(text(row, "intf_id"))
+        try:
+            neighbors.append(
+                NXOSNeighbor(
+                    protocol="cdp",
+                    local_interface=_required_local(local, SHOW_CDP_NEIGHBORS_DETAIL),
+                    remote_name=text(row, "device_id"),
+                    remote_port=text(row, "port_id"),
+                    remote_platform=text(row, "platform_id"),
+                    remote_description=text(row, "version"),
+                    management_addresses=_addresses_of(row, "v4mgmtaddr", "v6mgmtaddr"),
+                    capabilities=_cdp_capabilities(row.get("capability")),
+                    entry_addresses=_addresses_of(row, "v4addr", "v6addr"),
+                    native_vlan=_neighbor_vlan(row, "nativevlan"),
+                    duplex=_neighbor_duplex(text(row, "duplexmode")),
+                    remote_system_name=text(row, "sysname"),
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_CDP_NEIGHBORS_DETAIL!r} value on {local}: {exc}"
+            ) from exc
+    return neighbors
+
+
+def parse_show_lldp_neighbors_detail(
+    output: str, *, wrap_width: int | None = None
+) -> list[NXOSNeighbor]:
+    """LLDP neighbors; empty output (no neighbors) gives none.
+
+    `neigh_count`, when printed, must equal the records read, so a dropped
+    neighbor is a ParseError.
+    """
+    if not output.strip():
+        return []
+    data = parse_json(SHOW_LLDP_NEIGHBORS_DETAIL, output, wrap_width=wrap_width)
+    records = rows(data, "TABLE_nbor_detail", "ROW_nbor_detail", SHOW_LLDP_NEIGHBORS_DETAIL)
+    count = text(data, "neigh_count")
+    if count is not None and (not count.isdigit() or int(count) != len(records)):
+        raise ParseError(
+            f"{SHOW_LLDP_NEIGHBORS_DETAIL!r} says {count} neighbors but lists {len(records)}"
+        )
+    neighbors = []
+    for row in records:
+        local = _local_name(text(row, "l_port_id"))
+        try:
+            neighbors.append(
+                NXOSNeighbor(
+                    protocol="lldp",
+                    local_interface=_required_local(local, SHOW_LLDP_NEIGHBORS_DETAIL),
+                    remote_name=text(row, "sys_name"),
+                    remote_port=text(row, "port_id"),
+                    remote_port_description=text(row, "port_desc"),
+                    remote_chassis_id=text(row, "chassis_id"),
+                    remote_description=text(row, "sys_desc"),
+                    management_addresses=_addresses_of(row, "mgmt_addr", "mgmt_addr_ipv6"),
+                    capabilities=_lldp_capabilities(text(row, "enabled_capability")),
+                    native_vlan=_neighbor_vlan(row, "vlan_id"),
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_LLDP_NEIGHBORS_DETAIL!r} value on {local}: {exc}"
+            ) from exc
+    return neighbors
+
+
+def _required_local(name: str | None, command: str) -> str:
+    if name is None:
+        raise ParseError(f"{command!r} has a neighbor without a local interface")
+    return name
+
+
+def _addresses_of(row: dict[str, Any], *keys: str) -> tuple[IPv4Address | IPv6Address, ...]:
+    """Every address in the given fields (a string or a list), in order, once."""
+    found: list[IPv4Address | IPv6Address] = []
+    for key in keys:
+        value = row.get(key)
+        items = value if isinstance(value, list) else [] if value is None else [value]
+        for item in items:
+            if not isinstance(item, str | int) or isinstance(item, bool):
+                raise ParseError(f"neighbor field {key!r} is not an address: {item!r}")
+            item = str(item).strip()
+            if item.lower() in _NOT_ADVERTISED:
+                continue
+            try:
+                address = ip_address(item)
+            except ValueError:
+                # Not an IP (an LLDP neighbor may advertise a MAC here): not ours.
+                log.info("neighbor field %r holds a non-IP address; skipped", key)
+                continue
+            if address not in found:
+                found.append(address)
+    return tuple(found)
+
+
+def _cdp_capabilities(value: Any) -> tuple[str, ...]:
+    items = value if isinstance(value, list) else [] if value is None else [value]
+    if not all(isinstance(i, str) for i in items):
+        raise ParseError(f"CDP capability is {value!r}")
+    return tuple(i.strip().lower() for i in items if i.strip())
+
+
+def _lldp_capabilities(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    names = []
+    for code in (c.strip() for c in value.split(",") if c.strip()):
+        name = _LLDP_CAPABILITIES.get(code)
+        if name is None:
+            log.warning("unrecognised LLDP capability code %r; kept as printed", code)
+            name = code.lower()
+        names.append(name)
+    return tuple(names)
+
+
+def _neighbor_vlan(row: dict[str, Any], key: str) -> int | None:
+    value = text(row, key)
+    if value is None or not value.isdigit() or not 1 <= int(value) <= 4094:
+        return None  # not advertised, or "not advertised"
+    return int(value)
+
+
+def _neighbor_duplex(value: str | None) -> Duplex | None:
+    if value is None:
+        return None
+    return _DUPLEX.get(value.lower())

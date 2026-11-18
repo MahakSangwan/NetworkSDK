@@ -1,5 +1,6 @@
 """Cisco NX-OS device."""
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from os import PathLike
@@ -7,10 +8,12 @@ from pathlib import Path
 from typing import ClassVar
 
 from netsdk.cisco.nxos.commands import (
+    SHOW_CDP_NEIGHBORS_DETAIL,
     SHOW_INTERFACE,
     SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
+    SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
@@ -19,14 +22,17 @@ from netsdk.cisco.nxos.models import (
     NXOSVLAN,
     NXOSFacts,
     NXOSInterface,
+    NXOSNeighbor,
     NXOSSwitchport,
     NXOSVTPStatus,
 )
 from netsdk.cisco.nxos.parsers import (
     parse_facts,
+    parse_show_cdp_neighbors_detail,
     parse_show_interface,
     parse_show_interface_switchport,
     parse_show_ip_interface,
+    parse_show_lldp_neighbors_detail,
     parse_show_vlan_brief,
     parse_show_vtp_status,
 )
@@ -45,6 +51,11 @@ from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
     DEFAULT_TERMINAL_HEIGHT,
 )
+
+log = logging.getLogger(__name__)
+
+#: How NX-OS rejects a command that doesn't exist, e.g. without its feature.
+_REJECTED = "% Invalid command"
 
 
 class CiscoNXOS(Device):
@@ -206,10 +217,51 @@ class CiscoNXOS(Device):
         except CommandError as exc:
             # Only "% Invalid command" (the command doesn't exist without its
             # feature); an authorization failure stays an error.
-            if exc.output and "% Invalid command" in exc.output:
+            if exc.output and _REJECTED in exc.output:
                 raise NotSupportedError(
                     f"{command!r} is not available: {reason}", host=self.host
                 ) from exc
+            raise
+
+    def get_neighbors(self) -> list[NXOSNeighbor]:
+        """CDP neighbors, then LLDP neighbors, each tagged with its protocol.
+
+        A protocol that is off (its command rejected, e.g. `feature lldp` not
+        enabled) contributes no neighbors and is logged; NotSupportedError
+        only when both are (D44).
+        """
+        raw = self.get_neighbors_raw()
+        off = [command for command, output in raw.items() if _REJECTED in output]
+        if len(off) == len(raw):
+            raise NotSupportedError("neither CDP nor LLDP is enabled", host=self.host)
+        for command in off:
+            log.info("%s: %r rejected; that protocol is off", self.host, command)
+        cdp, lldp = raw[SHOW_CDP_NEIGHBORS_DETAIL], raw[SHOW_LLDP_NEIGHBORS_DETAIL]
+        width = self.terminal_width
+        with self._attributed():
+            neighbors = (
+                []
+                if SHOW_CDP_NEIGHBORS_DETAIL in off
+                else (parse_show_cdp_neighbors_detail(cdp, wrap_width=width))
+            )
+            if SHOW_LLDP_NEIGHBORS_DETAIL not in off:
+                neighbors += parse_show_lldp_neighbors_detail(lldp, wrap_width=width)
+            return neighbors
+
+    def get_neighbors_raw(self) -> dict[str, str]:
+        """Both commands' output; a rejected command's message is kept, not raised."""
+        return {
+            command: self._send_keeping_rejection(command)
+            for command in (SHOW_CDP_NEIGHBORS_DETAIL, SHOW_LLDP_NEIGHBORS_DETAIL)
+        }
+
+    def _send_keeping_rejection(self, command: str) -> str:
+        try:
+            return self.send_command(command)
+        except CommandError as exc:
+            # Only "% Invalid command"; an authorization failure stays an error.
+            if exc.output and _REJECTED in exc.output:
+                return exc.output
             raise
 
     @contextmanager

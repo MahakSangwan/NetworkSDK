@@ -5,6 +5,7 @@ from netsdk.cisco.nxos.models import (
     NXOSVLAN,
     NXOSFacts,
     NXOSInterface,
+    NXOSNeighbor,
     NXOSSwitchport,
     NXOSVTPStatus,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "CiscoNXOS",
     "NXOSFacts",
     "NXOSInterface",
+    "NXOSNeighbor",
     "NXOSSSHTransport",
     "NXOSSwitchport",
     "NXOSVTPStatus",
