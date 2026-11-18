@@ -1,11 +1,12 @@
-"""TEMPORARY diagnostic (2026-11-18): delete once the 7.3 pager issue is fixed.
+"""TEMPORARY diagnostic (2026-11-18): delete once the 7.3 issue is fixed.
 
 `get_vlans()` on 7.3(11)N1(1) read `Ethernet115-18` where `Ethernet1/15-18`
-is expected. Suspected cause: a `--More--` prompt in the middle of a line
-longer than the terminal, whose erase backs up one column too far. This
-test runs `show vlan brief | json` in its own session on a 24-line terminal,
-then prints the bytes around every pager prompt that isn't at a line start,
-with letters masked as `a` and digits as `9` (no names or numbers).
+is expected. The first probe showed the pager is fine: the switch itself
+breaks long JSON strings across lines, and a character seems to go missing
+at the break. This probe prints every line break inside a JSON string of
+`show vlan brief | json` (port lists) and `show interface switchport | json`
+(VLAN lists), with 20 characters on each side. Only interface names and VLAN
+numbers are in those strings; VLAN names and descriptions are masked.
 
     uv run pytest -m live -s -rs packages/cisco-nxos/tests/live -k pager_probe
 
@@ -20,7 +21,7 @@ import pytest
 from pydantic import SecretStr
 
 from netsdk.cisco.nxos import CiscoNXOS
-from netsdk.cisco.nxos.commands import SHOW_VLAN_BRIEF
+from netsdk.cisco.nxos.commands import SHOW_INTERFACE_SWITCHPORT, SHOW_VLAN_BRIEF
 from netsdk.core import Credentials
 
 pytestmark = pytest.mark.live
@@ -36,16 +37,42 @@ PASSWORD = _env("NETSDK_PASSWORD")
 KEY_FILE = _env("NETSDK_KEY_FILE")
 KEY_PASSPHRASE = _env("NETSDK_KEY_PASSPHRASE")
 
+#: Keys whose strings may hold names or descriptions: masked if they break.
+_SENSITIVE_KEY = re.compile(r"name|desc", re.IGNORECASE)
+
 
 def _mask(text: str) -> str:
     return re.sub(r"[A-Za-z]", "a", re.sub(r"[0-9]", "9", text))
+
+
+def _breaks_inside_strings(output: str) -> list[tuple[str, int, str, str]]:
+    """(key, length of the broken line, text before, text after) per break."""
+    found = []
+    lines = output.split("\n")
+    in_string = False
+    key = ""
+    for index, line in enumerate(lines):
+        escaped = False
+        for char in line:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = not in_string
+        if in_string and index + 1 < len(lines):
+            keys = re.findall(r'"([^"]+)"\s*:', line) or [key]
+            key = keys[-1]
+            found.append((key, len(line), line[-20:], lines[index + 1][:20]))
+    return found
 
 
 @pytest.mark.skipif(
     not (HOST and USERNAME and (PASSWORD or KEY_FILE)),
     reason="set NETSDK_NXOS_HOST, NETSDK_USERNAME and NETSDK_PASSWORD and/or NETSDK_KEY_FILE",
 )
-def test_pager_probe() -> None:
+@pytest.mark.parametrize("command", [SHOW_VLAN_BRIEF, SHOW_INTERFACE_SWITCHPORT])
+def test_pager_probe(command: str) -> None:
     assert HOST
     assert USERNAME
     creds = Credentials(
@@ -60,28 +87,14 @@ def test_pager_probe() -> None:
         port=int(_env("NETSDK_NXOS_PORT") or 22),
         timeout=300.0,
         session_log_dir=Path(_env("NETSDK_SESSION_LOG_DIR") or "session_logs"),
-        terminal_height=24,
     )
     with device:
-        output = device.send_command(SHOW_VLAN_BRIEF)
-    log = device.session_log
-    assert log is not None
-    # The session log is flushed on close, so it is complete here.
-    data = log.read_bytes().decode("utf-8", "replace")
-    prompts = list(re.finditer("--More--", data))
-    mid_line = [m for m in prompts if not data[: m.start()].rstrip(" ").endswith("\n")]
-    longest = max((len(line) for line in data.split("\n")), default=0)
-    print(f"\nsession log: {log}")
-    print(f"pager prompts: {len(prompts)}, not at a line start: {len(mid_line)}")
-    print(f"longest raw line: {longest} chars")
-    print("15 chars before | the prompt | 35 chars after (control characters shown):")
-    for m in mid_line[:10]:
-        before = _mask(data[max(m.start() - 15, 0) : m.start()])
-        after = _mask(data[m.end() : m.end() + 35])
-        print(f"  {before!r} | {data[m.start() : m.end()]!r} | {after!r}")
-    # Same for the first few prompts at a line start, for comparison.
-    for m in [p for p in prompts if p not in mid_line][:3]:
-        print(f"  line start: {_mask(data[m.end() : m.end() + 35])!r}")
-    # And the bad port names as they came out (masked), if any.
-    bad = sorted({_mask(t) for t in re.findall(r"Ethernet\d+-\d+", output)})
-    print(f"port names with a range but no '/' (masked): {bad or 'none'}")
+        output = device.send_command(command)
+    breaks = _breaks_inside_strings(output)
+    print(f"\n{command!r}: {len(output.splitlines())} lines, {len(breaks)} breaks inside strings")
+    print(f"lengths of the broken lines: {sorted({length for _, length, _, _ in breaks})}")
+    print(f"keys with breaks: {sorted({key for key, _, _, _ in breaks})}")
+    for key, _, before, after in breaks[:12]:
+        if _SENSITIVE_KEY.search(key):
+            before, after = _mask(before), _mask(after)
+        print(f"  {key}: {before!r} <break> {after!r}")
