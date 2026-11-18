@@ -5,6 +5,7 @@ import pytest
 
 from netsdk.cisco.nxos import CiscoNXOS, NXOSSSHTransport
 from netsdk.cisco.nxos.commands import SHOW_INVENTORY, SHOW_VERSION
+from netsdk.cisco.nxos.transport import NXOS_TERMINAL_WIDTH
 from netsdk.core import CommandError, Credentials, ParseError, SupportsFacts
 from netsdk.core.testing import FakeCLI, FakeConnection
 
@@ -59,16 +60,16 @@ def test_get_facts_sends_only_its_two_commands(
     assert conn.writes == [f"{SHOW_VERSION}\n", f"{SHOW_INVENTORY}\n", "exit\n"]
 
 
-def wrap_511(text: str) -> str:
-    # NX-OS hard-wraps one-line JSON at the 511-column terminal (live, 10.5).
-    return "\r\n".join(text[i : i + 511] for i in range(0, len(text), 511))
+def wrap(text: str, width: int = NXOS_TERMINAL_WIDTH) -> str:
+    # NX-OS hard-wraps one-line JSON at the terminal width (live, 10.5).
+    return "\r\n".join(text[i : i + width] for i in range(0, len(text), width))
 
 
 def test_93_noise_and_wrapped_one_line_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     one_line = {
-        cmd: NOISE_93 + wrap_511(json.dumps(json.loads(text))) + "\r\n"
+        cmd: NOISE_93 + wrap(json.dumps(json.loads(text))) + "\r\n"
         for cmd, text in ((SHOW_VERSION, VERSION_JSON), (SHOW_INVENTORY, INVENTORY_JSON))
     }
     assert "\r\n" in one_line[SHOW_VERSION][len(NOISE_93) :]
@@ -143,3 +144,25 @@ def test_unparseable_output_names_the_host(monkeypatch: pytest.MonkeyPatch, tmp_
     ):
         device.get_facts()
     assert excinfo.value.host == "sw1.example"
+
+
+def test_terminal_is_255_wide_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # 7.3(11)N1(1) drops a character at 255 on wider terminals (D42).
+    device = make_device(monkeypatch, tmp_path, nxos_cli({}).connection())
+    assert device.terminal_width == NXOS_TERMINAL_WIDTH == 255
+
+
+def test_output_wrapped_wider_than_the_terminal_is_damage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A break that isn't at the session's own width is never joined (D38, D42).
+    wide = {
+        cmd: wrap(json.dumps(json.loads(text)), 511) + "\r\n"
+        for cmd, text in ((SHOW_VERSION, VERSION_JSON), (SHOW_INVENTORY, INVENTORY_JSON))
+    }
+    cli = nxos_cli({cmd: [text] for cmd, text in wide.items()})
+    with (
+        make_device(monkeypatch, tmp_path, cli.connection()) as device,
+        pytest.raises(ParseError, match="broken across lines"),
+    ):
+        device.get_facts()

@@ -4,6 +4,12 @@ from typing import ClassVar
 
 from netsdk.core.transports.ssh import SSHTransport
 
+#: SSH terminal width for NX-OS sessions (D42). On a terminal wider than 255
+#: columns, 7.3(11)N1(1) cuts output lines at 255 characters and drops the
+#: next one; at 255 or less it wraps at the terminal width and loses nothing
+#: (live, 2026-11-18: widths 80-255 clean, 256 and 511 damaged).
+NXOS_TERMINAL_WIDTH = 255
+
 
 class NXOSSSHTransport(SSHTransport):
     """NX-OS CLI over SSH, paging through `--More--` (no `terminal length 0`, D25)."""

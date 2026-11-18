@@ -22,13 +22,12 @@ from netsdk.cisco.nxos.parsers import (
     parse_show_ip_interface,
     parse_show_vlan_brief,
 )
-from netsdk.cisco.nxos.transport import NXOSSSHTransport
+from netsdk.cisco.nxos.transport import NXOS_TERMINAL_WIDTH, NXOSSSHTransport
 from netsdk.core import Credentials, Device, DeviceConnectionError, IPAddress, NetSDKError
 from netsdk.core.device import DEFAULT_SESSION_LOG_DIR
 from netsdk.core.transports.ssh import (
     DEFAULT_KNOWN_HOSTS,
     DEFAULT_TERMINAL_HEIGHT,
-    DEFAULT_TERMINAL_WIDTH,
 )
 
 
@@ -47,7 +46,7 @@ class CiscoNXOS(Device):
         session_log_dir: str | PathLike[str] = DEFAULT_SESSION_LOG_DIR,
         known_hosts_file: Path | None = DEFAULT_KNOWN_HOSTS,
         strict_host_keys: bool = False,
-        terminal_width: int = DEFAULT_TERMINAL_WIDTH,
+        terminal_width: int = NXOS_TERMINAL_WIDTH,
         terminal_height: int = DEFAULT_TERMINAL_HEIGHT,
     ) -> None:
         super().__init__(

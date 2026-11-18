@@ -7,6 +7,7 @@ import pytest
 from netsdk.cisco.nxos import CiscoNXOS, NXOSInterface, NXOSSSHTransport
 from netsdk.cisco.nxos.commands import SHOW_INTERFACE
 from netsdk.cisco.nxos.parsers import parse_show_interface
+from netsdk.cisco.nxos.transport import NXOS_TERMINAL_WIDTH
 from netsdk.core import Credentials, ParseError, SupportsInterfaces
 from netsdk.core.testing import FakeCLI, FakeConnection
 
@@ -217,11 +218,12 @@ def make_device(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, conn: FakeConne
 def test_get_interfaces_sends_only_show_interface(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # One line wrapped at 511 columns and paged every 23 lines, as 10.5 sends it.
+    # One line wrapped at the terminal width and paged every 23 lines, as 10.5 sends it.
     one_line = json.dumps(
         json.loads((NAPALM / "ssh_Nexus3548_show_interface_json.txt").read_text())
     )
-    lines = [one_line[i : i + 511] for i in range(0, len(one_line), 511)]
+    width = NXOS_TERMINAL_WIDTH
+    lines = [one_line[i : i + width] for i in range(0, len(one_line), width)]
     pages = ["".join(f"{line}\r\n" for line in lines[i : i + 23]) for i in range(0, len(lines), 23)]
     assert len(pages) > 2
     conn = FakeCLI({SHOW_INTERFACE: pages}, hostname="sw1", terminator="# ").connection()

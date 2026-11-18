@@ -23,8 +23,10 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | `get_switchports()` | `show interface switchport \| json` | Layer-2 ports: mode, access/native VLAN, allowed VLANs; `1-4094` is `all_vlans_allowed`. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
-Strings the switch breaks across lines (7.3 cuts them at 255 characters and
-loses one) are never repaired: reading one raises `ParseError`.
+Sessions use a 255-column terminal: on a wider one NX-OS 7.3 cuts lines at
+255 characters and drops one (D42). Any string still broken across lines
+other than at the terminal width is never repaired: reading it raises
+`ParseError`.
 Lines NX-OS prints ahead of the JSON (`SB: Permission denied.` on 9.3) are
 logged at INFO and ignored. Output that isn't one complete JSON object
 raises `ParseError`, never an empty or partial model.
