@@ -9,6 +9,7 @@ importing this module works without them.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,25 @@ from netsdk.core.exceptions import ParseError
 log = logging.getLogger(__name__)
 
 
-def parse_json(command: str, output: str) -> dict[str, Any]:
+class Damaged:
+    """Stands in for a JSON string the device broke (see `parse_json`)."""
+
+    def __repr__(self) -> str:
+        return "<damaged by the device>"
+
+
+#: Replaces every string value the device broke across lines; reading one
+#: must fail, never return the text with a character missing.
+DAMAGED = Damaged()
+
+# A JSON string, newlines included (they are invalid JSON, but devices print
+# them); used to find line breaks inside strings.
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
+# Put where a damaged break was: a private-use character no device prints.
+_BREAK_MARK = "\ue000"
+
+
+def parse_json(command: str, output: str, *, wrap_width: int | None = None) -> dict[str, Any]:
     """Read the one JSON object a CLI printed for `command`.
 
     Lines the device prints before the object (NX-OS 9.3 prints
@@ -25,11 +44,12 @@ def parse_json(command: str, output: str) -> dict[str, Any]:
     ignored; they are never read as data. Raises ParseError when there is no
     object, it is broken or cut short, or anything follows it.
 
-    Line breaks inside the object are removed before decoding: NX-OS
-    hard-wraps its one-line JSON at the terminal width (511 at most), often
-    inside a string. That is always safe: JSON never needs a newline to
-    separate tokens, and a raw newline inside a string is invalid JSON, so a
-    newline is either indentation or a wrap break.
+    Line breaks between tokens (indentation) are dropped. A break inside a
+    string is a terminal wrap when its line is exactly `wrap_width` long
+    (NX-OS 10.5 wraps one-line JSON at the terminal width): it is joined. Any
+    other break inside a string is damage (NX-OS 7.3 cuts long strings at 255
+    characters and loses one at each cut): that string becomes `DAMAGED`, so
+    reading it fails instead of returning wrong text.
     """
     lines = output.split("\n")
     start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("{")), None)
@@ -43,7 +63,30 @@ def parse_json(command: str, output: str) -> dict[str, Any]:
             len(before),
             " | ".join(before),
         )
-    text = "".join(lines[start:]).strip()
+    body = "\n".join(lines[start:])
+    if _BREAK_MARK in body:
+        raise ParseError(f"{command!r} output contains U+E000, which netsdk reserves")
+    damaged = 0
+
+    def unbreak(match: re.Match[str]) -> str:
+        nonlocal damaged
+        string = match.group(0)
+        if "\n" not in string:
+            return string
+        pieces = string.split("\n")
+        joined = pieces[0]
+        line_start = body.rfind("\n", 0, match.start()) + 1
+        line_length = match.start() - line_start + len(pieces[0])
+        for piece in pieces[1:]:
+            if wrap_width is not None and line_length == wrap_width:
+                joined += piece
+            else:
+                joined += _BREAK_MARK + piece
+                damaged += 1
+            line_length = len(piece)
+        return joined
+
+    text = _JSON_STRING.sub(unbreak, body).replace("\n", "").strip()
     try:
         data, end = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError as exc:
@@ -52,7 +95,28 @@ def parse_json(command: str, output: str) -> dict[str, Any]:
         raise ParseError(f"{command!r} output continues after its JSON object")
     if not isinstance(data, dict):
         raise ParseError(f"{command!r} output is JSON but not an object")
+    if damaged:
+        log.info(
+            "%r: %d line break(s) inside strings that aren't terminal wraps; "
+            "those values are unreadable",
+            command,
+            damaged,
+        )
+        marked: dict[str, Any] = _mark_damaged(command, data)
+        return marked
     return data
+
+
+def _mark_damaged(command: str, value: Any) -> Any:
+    if isinstance(value, dict):
+        if any(_BREAK_MARK in key for key in value):
+            raise ParseError(f"{command!r} output has a field name broken across lines")
+        return {key: _mark_damaged(command, item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_mark_damaged(command, item) for item in value]
+    if isinstance(value, str) and _BREAK_MARK in value:
+        return DAMAGED
+    return value
 
 
 def parse_textfsm(

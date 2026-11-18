@@ -25,7 +25,7 @@ from netsdk.cisco.nxos.commands import (
 from netsdk.cisco.nxos.models import NXOSVLAN, NXOSFacts, NXOSInterface, NXOSSwitchport
 from netsdk.core import Duplex, IPAddress, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
-from netsdk.core.parsing import parse_json
+from netsdk.core.parsing import Damaged, parse_json
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,8 @@ def text(data: dict[str, Any], key: str) -> str | None:
     value = data.get(key)
     if value is None:
         return None
+    if isinstance(value, Damaged):
+        raise ParseError(f"field {key!r} was broken across lines by the device; unreadable")
     if isinstance(value, bool) or not isinstance(value, str | int | float):
         raise ParseError(f"field {key!r} is not a plain value: {value!r}")
     value = str(value).strip()
@@ -77,9 +79,11 @@ _UPTIME_FIELDS = {
 }
 
 
-def parse_facts(show_version: str, show_inventory: str) -> NXOSFacts:
-    version = parse_json(SHOW_VERSION, show_version)
-    inventory = parse_json(SHOW_INVENTORY, show_inventory)
+def parse_facts(
+    show_version: str, show_inventory: str, *, wrap_width: int | None = None
+) -> NXOSFacts:
+    version = parse_json(SHOW_VERSION, show_version, wrap_width=wrap_width)
+    inventory = parse_json(SHOW_INVENTORY, show_inventory, wrap_width=wrap_width)
 
     hostname = text(version, "host_name")
     # 9.x and later print `nxos_ver_str`; 7.x prints kickstart and system
@@ -147,8 +151,8 @@ _UP_DOWN = {"up": True, "down": False}
 _ADMIN_DOWN = "administratively down"
 
 
-def parse_show_interface(output: str) -> list[NXOSInterface]:
-    data = parse_json(SHOW_INTERFACE, output)
+def parse_show_interface(output: str, *, wrap_width: int | None = None) -> list[NXOSInterface]:
+    data = parse_json(SHOW_INTERFACE, output, wrap_width=wrap_width)
     records = rows(data, "TABLE_interface", "ROW_interface", SHOW_INTERFACE)
     if not records:
         raise ParseError(f"{SHOW_INTERFACE!r} output lists no interfaces")
@@ -256,7 +260,7 @@ def _duplex(name: str, value: str | None) -> Duplex | None:
 _DEFAULT_VRF = "default"
 
 
-def parse_show_ip_interface(output: str) -> list[IPAddress]:
+def parse_show_ip_interface(output: str, *, wrap_width: int | None = None) -> list[IPAddress]:
     """One record per IPv4 address: each interface's primary, then its secondaries.
 
     NX-OS prints the VRF in one of two layouts (D40):
@@ -265,7 +269,7 @@ def parse_show_ip_interface(output: str) -> list[IPAddress]:
       that VRF's interfaces (one object or a list). Paired by position only
       when their lengths match.
     """
-    data = parse_json(SHOW_IP_INTERFACE, output)
+    data = parse_json(SHOW_IP_INTERFACE, output, wrap_width=wrap_width)
     groups = [_row_list(entry, "ROW_intf") for entry in _entries(data, "TABLE_intf")]
     pairs: list[tuple[str | None, dict[str, Any]]]
     if "TABLE_vrf" in data:
@@ -382,8 +386,10 @@ def vlan_ids(value: str) -> tuple[int, ...]:
     return tuple(sorted(ids))
 
 
-def parse_show_interface_switchport(output: str) -> list[NXOSSwitchport]:
-    data = parse_json(SHOW_INTERFACE_SWITCHPORT, output)
+def parse_show_interface_switchport(
+    output: str, *, wrap_width: int | None = None
+) -> list[NXOSSwitchport]:
+    data = parse_json(SHOW_INTERFACE_SWITCHPORT, output, wrap_width=wrap_width)
     ports = []
     for row in rows(data, "TABLE_interface", "ROW_interface", SHOW_INTERFACE_SWITCHPORT):
         name = text(row, "interface")
@@ -447,23 +453,21 @@ def _allowed_vlans(name: str, value: str | None) -> tuple[bool, tuple[int, ...] 
 
 # -- show vlan brief (D41) ---------------------------------------------------
 
-# "Ethernet1/6-10", "port-channel10-13", "Ethernet101/1/1-4": a range in the
-# last number of the name.
-_PORT_RANGE = re.compile(r"(.*?)(\d+)-(\d+)")
 
-
-def parse_show_vlan_brief(show_vlan_brief: str, show_interface_switchport: str) -> list[NXOSVLAN]:
+def parse_show_vlan_brief(
+    show_vlan_brief: str, show_interface_switchport: str, *, wrap_width: int | None = None
+) -> list[NXOSVLAN]:
     """VLANs with their access ports only.
 
-    NX-OS lists trunk ports under every VLAN they carry; a port stays only if
-    `show interface switchport` says it is an access port in that VLAN.
+    ID, name and state come from `show vlan brief`; its port lists are not
+    read: they include trunk ports, and 7.3(11)N1(1) damages them (D41).
+    A VLAN's ports are the access ports `show interface switchport` puts in it.
     """
-    data = parse_json(SHOW_VLAN_BRIEF, show_vlan_brief)
-    access = {
-        p.interface: p.access_vlan
-        for p in parse_show_interface_switchport(show_interface_switchport)
-        if p.mode == "access"
-    }
+    data = parse_json(SHOW_VLAN_BRIEF, show_vlan_brief, wrap_width=wrap_width)
+    members: dict[int, list[str]] = {}
+    for p in parse_show_interface_switchport(show_interface_switchport, wrap_width=wrap_width):
+        if p.mode == "access" and p.access_vlan is not None:
+            members.setdefault(p.access_vlan, []).append(p.interface)
     vlans = []
     for row in rows(data, "TABLE_vlanbriefxbrief", "ROW_vlanbriefxbrief", SHOW_VLAN_BRIEF):
         # The -utf ID is the right one where both exist: some releases print
@@ -476,14 +480,13 @@ def parse_show_vlan_brief(show_vlan_brief: str, show_interface_switchport: str) 
         if status is None:
             raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} has no state")
         shut = text(row, "vlanshowbr-shutstate")
-        ports = vlan_ports(vlan_id, row.get("vlanshowplist-ifidx"))
         try:
             vlans.append(
                 NXOSVLAN(
                     vlan_id=vlan_id,
                     name=text(row, "vlanshowbr-vlanname"),
                     active=status == "active" and shut in (None, "noshutdown"),
-                    interfaces=tuple(p for p in ports if access.get(p) == vlan_id),
+                    interfaces=tuple(members.get(vlan_id, ())),
                     status=status,
                     shut_state=shut,
                 )
@@ -496,27 +499,7 @@ def parse_show_vlan_brief(show_vlan_brief: str, show_interface_switchport: str) 
     if len(set(ids)) != len(ids):
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
         raise ParseError(f"{SHOW_VLAN_BRIEF!r} lists VLAN {duplicates} more than once")
+    orphans = sorted(set(members) - set(ids))
+    if orphans:
+        log.info("access ports in VLANs that don't exist: %s", orphans)
     return vlans
-
-
-def vlan_ports(vlan_id: int, value: Any) -> list[str]:
-    """The port list as printed: a string or a list of strings, with ranges."""
-    if value is None:
-        return []
-    parts = [value] if isinstance(value, str) else value
-    if not isinstance(parts, list) or not all(isinstance(p, str) for p in parts):
-        raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} ports are {value!r}")
-    ports: list[str] = []
-    for item in ",".join(parts).split(","):
-        item = item.strip()
-        if not item:
-            continue
-        match = _PORT_RANGE.fullmatch(item)
-        if match is None:
-            ports.append(item)
-            continue
-        prefix, first, last = match[1], int(match[2]), int(match[3])
-        if not prefix or first > last:
-            raise ParseError(f"{SHOW_VLAN_BRIEF!r}: VLAN {vlan_id} has an unreadable port {item!r}")
-        ports.extend(f"{prefix}{n}" for n in range(first, last + 1))
-    return ports

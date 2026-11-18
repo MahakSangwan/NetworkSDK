@@ -171,20 +171,44 @@ def test_trunk_ports_are_filtered_out() -> None:
     assert vlans[161].interfaces == ()
 
 
-def test_port_ranges_and_list_form() -> None:
+def test_port_lists_are_not_read() -> None:
+    # 7.3(11)N1(1) damages long port lists (live, 2026-11-18); members come
+    # from the switchport output, in its order, whatever the list says.
     vlans = parse_show_vlan_brief(
         (NAPALM / "ssh_6000_show_vlan_brief_json.txt").read_text(),
         switchport_json(
             port("Ethernet1/8", access="230"),
             port("port-channel11", access="230"),
-            port("Ethernet101/1/9", access="231"),  # FEX port, inside "Ethernet101/1/4-14"
-            port("Ethernet1/19", access="231"),  # inside "Ethernet1/18-20"
+            port("Ethernet101/1/9", access="231"),
+            port("Ethernet1/4", access="999"),  # VLAN 999 doesn't exist: no record
         ),
     )
     assert [(v.vlan_id, v.name, v.interfaces) for v in vlans] == [
-        (230, "database", ("port-channel11", "Ethernet1/8")),
-        (231, "APPLICATION", ("Ethernet1/19", "Ethernet101/1/9")),
+        (230, "database", ("Ethernet1/8", "port-channel11")),
+        (231, "APPLICATION", ("Ethernet101/1/9",)),
     ]
+
+
+def test_damaged_port_list_is_harmless() -> None:
+    damaged = (
+        '{\n  "TABLE_vlanbriefxbrief": {\n    "ROW_vlanbriefxbrief": {\n'
+        '      "vlanshowbr-vlanid-utf": 10,\n      "vlanshowbr-vlanname": "users",\n'
+        '      "vlanshowbr-vlanstate": "active",\n      "vlanshowbr-shutstate": "noshutdown",\n'
+        '      "vlanshowplist-ifidx": ["Ethernet1/1,Ethernet1\n3"]\n    }\n  }\n}'
+    )
+    (vlan,) = parse_show_vlan_brief(
+        damaged, switchport_json(port("Ethernet1/1", access="10")), wrap_width=511
+    )
+    assert vlan.interfaces == ("Ethernet1/1",)
+
+
+def test_damaged_vlan_name_is_a_parse_error() -> None:
+    damaged = (
+        '{"TABLE_vlanbriefxbrief": {"ROW_vlanbriefxbrief": {"vlanshowbr-vlanid-utf": 10, '
+        '"vlanshowbr-vlanname": "us\ners", "vlanshowbr-vlanstate": "active"}}}'
+    )
+    with pytest.raises(ParseError, match="broken across lines"):
+        parse_show_vlan_brief(damaged, switchport_json(port("Ethernet1/1")), wrap_width=511)
 
 
 def test_utf_vlan_id_wins_over_a_garbled_plain_one() -> None:
@@ -233,8 +257,6 @@ def test_vlan_without_ports() -> None:
         pytest.param({"vlanshowbr-vlanid-utf": "x", "vlanshowbr-vlanid": "x"}, id="id"),
         pytest.param({"vlanshowbr-vlanid-utf": "4095"}, id="id-range"),
         pytest.param({"vlanshowbr-vlanstate": None}, id="no-state"),
-        pytest.param({"vlanshowplist-ifidx": 5}, id="ports-not-text"),
-        pytest.param({"vlanshowplist-ifidx": "Ethernet1/9-3"}, id="backwards-range"),
     ],
 )
 def test_vlan_problems_are_parse_errors(row: dict[str, Any]) -> None:

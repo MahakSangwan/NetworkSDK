@@ -41,7 +41,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
 )
-from netsdk.cisco.nxos.parsers import rows, text, vlan_ids, vlan_ports
+from netsdk.cisco.nxos.parsers import rows, text, vlan_ids
 from netsdk.core import (
     AuthenticationError,
     CommandError,
@@ -49,7 +49,7 @@ from netsdk.core import (
     DeviceConnectionError,
     IPAddress,
 )
-from netsdk.core.parsing import parse_json
+from netsdk.core.parsing import Damaged, parse_json
 
 pytestmark = pytest.mark.live
 
@@ -146,8 +146,8 @@ def test_json_layout(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> Non
     # Key names only (no values): confirms the fields get_facts() reads.
     with caplog.at_level(logging.INFO, logger="netsdk"):
         raw = shared.get_facts_raw()
-        version = parse_json(SHOW_VERSION, raw[SHOW_VERSION])
-        inventory = parse_json(SHOW_INVENTORY, raw[SHOW_INVENTORY])
+        version = _json(shared, SHOW_VERSION, raw[SHOW_VERSION])
+        inventory = _json(shared, SHOW_INVENTORY, raw[SHOW_INVENTORY])
     for command, output in raw.items():
         widths = sorted({len(line) for line in output.splitlines()}, reverse=True)[:3]
         print(f"\n{command!r}: {len(output.splitlines())} line(s), longest {widths}")
@@ -174,7 +174,8 @@ def test_get_facts(shared: CiscoNXOS) -> None:
     print("\n".join(f"{name}: {value}" for name, value in shown.items()))
     # Reported, not asserted: whether the board ID in `show version` is the
     # chassis serial (expected on fixed switches, not on modular ones).
-    board = text(parse_json(SHOW_VERSION, shared.get_facts_raw()[SHOW_VERSION]), "proc_board_id")
+    version = _json(shared, SHOW_VERSION, shared.get_facts_raw()[SHOW_VERSION])
+    board = text(version, "proc_board_id")
     print(f"show version board ID is the chassis serial: {board == facts.serial_number}")
     assert facts.vendor == "Cisco"
 
@@ -209,7 +210,7 @@ _DESCRIBE = re.compile(r"state|desc|mtu|speed|duplex|addr|mac|bw|mode|proto")
 @needs_device
 def test_interface_field_sets(shared: CiscoNXOS) -> None:
     # Field names only (no values), per interface type: confirms the mapping.
-    data = parse_json(SHOW_INTERFACE, shared.get_interfaces_raw()[SHOW_INTERFACE])
+    data = _json(shared, SHOW_INTERFACE, shared.get_interfaces_raw()[SHOW_INTERFACE])
     records = rows(data, "TABLE_interface", "ROW_interface", SHOW_INTERFACE)
     by_type: dict[str, list[dict[str, Any]]] = {}
     for r in records:
@@ -255,7 +256,7 @@ def _shape(value: Any) -> str:
 @needs_device
 def test_ip_interface_layout(shared: CiscoNXOS) -> None:
     # Structure and field names only (no values): confirms how VRFs pair up.
-    data = parse_json(SHOW_IP_INTERFACE, shared.get_ip_addresses_raw()[SHOW_IP_INTERFACE])
+    data = _json(shared, SHOW_IP_INTERFACE, shared.get_ip_addresses_raw()[SHOW_IP_INTERFACE])
     print(f"\ntop-level keys: {', '.join(data)}")
     for table in ("TABLE_vrf", "TABLE_intf"):
         entries = data.get(table)
@@ -395,7 +396,7 @@ def _walk(
 def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
     # Field paths and value kinds only; values only for mode/state fields.
     output = shared.send_command(command)
-    data = parse_json(command, output)
+    data = _json(shared, command, output)
     kinds: defaultdict[str, Counter[str]] = defaultdict(Counter)
     enums: dict[str, set[str]] = {}
     _walk(data, "", kinds, enums)
@@ -405,6 +406,26 @@ def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
         print(f"  {path}: {summary}")
         if path in enums:
             print(f"    values: {sorted(enums[path])}")
+
+
+def _json(device: CiscoNXOS, command: str, output: str) -> dict[str, Any]:
+    return parse_json(command, output, wrap_width=device.terminal_width)
+
+
+def _listed_ports(value: Any) -> set[str] | None:
+    """A `show vlan brief` port list, ranges expanded; None when damaged."""
+    parts: list[Any] = [value] if isinstance(value, str | Damaged) else list(value or [])
+    if not all(isinstance(part, str) for part in parts):
+        return None
+    ports: set[str] = set()
+    for item in ",".join(parts).split(","):
+        match = re.fullmatch(r"(.*?)(\d+)-(\d+)", item.strip())
+        if match is None:
+            ports.add(item.strip())
+        else:
+            ports.update(f"{match[1]}{n}" for n in range(int(match[2]), int(match[3]) + 1))
+    ports.discard("")
+    return ports
 
 
 @needs_device
@@ -419,24 +440,30 @@ def test_get_vlans(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> None:
         print(f"{v.vlan_id:>5} {v.active!s:<6} {v.status:<10} {shut:<11} {len(v.interfaces)}")
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
-    # Reported, not asserted: ports NX-OS listed that the access filter
-    # dropped (D41), by their switchport mode.
+    # Reported, not asserted: compare with the port lists of `show vlan brief`
+    # where they are intact (7.3 damages long ones, D41). Those lists hold
+    # trunk ports too, so only ports get_switchports() calls access count.
     raw = shared.get_vlans_raw()
     listed = rows(
-        parse_json(SHOW_VLAN_BRIEF, raw[SHOW_VLAN_BRIEF]),
+        _json(shared, SHOW_VLAN_BRIEF, raw[SHOW_VLAN_BRIEF]),
         "TABLE_vlanbriefxbrief",
         "ROW_vlanbriefxbrief",
         SHOW_VLAN_BRIEF,
     )
-    mode_of = {p.interface: p.oper_mode or "-" for p in shared.get_switchports()}
-    kept = {(v.vlan_id, name) for v in vlans for name in v.interfaces}
-    dropped: Counter[str] = Counter()
+    access = {p.interface for p in shared.get_switchports() if p.mode == "access"}
+    ours = {v.vlan_id: set(v.interfaces) for v in vlans}
+    damaged = missing = extra = 0
     for row in listed:
         vid = int(text(row, "vlanshowbr-vlanid-utf") or text(row, "vlanshowbr-vlanid") or 0)
-        for name in vlan_ports(vid, row.get("vlanshowplist-ifidx")):
-            if (vid, name) not in kept:
-                dropped[mode_of.get(name, "not a switchport")] += 1
-    print(f"VLAN/port pairs dropped as not access ports, by mode: {dict(dropped) or 'none'}")
+        ports = _listed_ports(row.get("vlanshowplist-ifidx"))
+        if ports is None:
+            damaged += 1
+            continue
+        theirs = ports & access
+        missing += len(theirs - ours.get(vid, set()))
+        extra += len(ours.get(vid, set()) - theirs)
+    print(f"VLANs with a damaged port list in show vlan brief: {damaged}")
+    print(f"access ports vs intact show vlan brief lists: {missing} missing, {extra} extra here")
     interface_names = {i.name for i in shared.get_interfaces()}
     unknown = sorted({p for v in vlans for p in v.interfaces} - interface_names)
     assert not unknown, f"VLAN ports that get_interfaces() doesn't list: {unknown}"
@@ -471,7 +498,7 @@ def test_get_switchports(shared: CiscoNXOS) -> None:
     assert not unknown, f"switchports that get_interfaces() doesn't list: {unknown}"
 
     # Cross-check (D41): each trunk's allowed list against `show interface trunk`.
-    trunk = parse_json(SHOW_INTERFACE_TRUNK, shared.send_command(SHOW_INTERFACE_TRUNK))
+    trunk = _json(shared, SHOW_INTERFACE_TRUNK, shared.send_command(SHOW_INTERFACE_TRUNK))
     table = trunk.get("TABLE_allowed_vlans")
     # 9.3/10.5: {ROW_allowed_vlans: [rows]}; 7.3(11)N1(1): a list of
     # {ROW_allowed_vlans: row}, without interface names (live, 2026-11-18).

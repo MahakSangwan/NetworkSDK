@@ -114,7 +114,9 @@ class CiscoNXOS(Device):
         """Hostname, chassis part ID and serial, OS version and uptime."""
         raw = self.get_facts_raw()
         with self._attributed():
-            return parse_facts(raw[SHOW_VERSION], raw[SHOW_INVENTORY])
+            return parse_facts(
+                raw[SHOW_VERSION], raw[SHOW_INVENTORY], wrap_width=self.terminal_width
+            )
 
     def get_facts_raw(self) -> dict[str, str]:
         return {command: self.send_command(command) for command in (SHOW_VERSION, SHOW_INVENTORY)}
@@ -123,7 +125,7 @@ class CiscoNXOS(Device):
         """Every interface with admin/oper state, MAC, MTU, speed and duplex."""
         raw = self.get_interfaces_raw()
         with self._attributed():
-            return parse_show_interface(raw[SHOW_INTERFACE])
+            return parse_show_interface(raw[SHOW_INTERFACE], wrap_width=self.terminal_width)
 
     def get_interfaces_raw(self) -> dict[str, str]:
         return {SHOW_INTERFACE: self.send_command(SHOW_INTERFACE)}
@@ -136,7 +138,7 @@ class CiscoNXOS(Device):
         """
         raw = self.get_ip_addresses_raw()
         with self._attributed():
-            return parse_show_ip_interface(raw[SHOW_IP_INTERFACE])
+            return parse_show_ip_interface(raw[SHOW_IP_INTERFACE], wrap_width=self.terminal_width)
 
     def get_ip_addresses_raw(self) -> dict[str, str]:
         return {SHOW_IP_INTERFACE: self.send_command(SHOW_IP_INTERFACE)}
@@ -145,7 +147,11 @@ class CiscoNXOS(Device):
         """VLANs with name, state and access ports (trunk ports: get_switchports())."""
         raw = self.get_vlans_raw()
         with self._attributed():
-            return parse_show_vlan_brief(raw[SHOW_VLAN_BRIEF], raw[SHOW_INTERFACE_SWITCHPORT])
+            return parse_show_vlan_brief(
+                raw[SHOW_VLAN_BRIEF],
+                raw[SHOW_INTERFACE_SWITCHPORT],
+                wrap_width=self.terminal_width,
+            )
 
     def get_vlans_raw(self) -> dict[str, str]:
         """`show vlan brief`, and `show interface switchport` to tell access ports (D41)."""
@@ -158,7 +164,9 @@ class CiscoNXOS(Device):
         """Layer-2 ports: mode, access/native VLAN and allowed VLANs (1-4094 is "all")."""
         raw = self.get_switchports_raw()
         with self._attributed():
-            return parse_show_interface_switchport(raw[SHOW_INTERFACE_SWITCHPORT])
+            return parse_show_interface_switchport(
+                raw[SHOW_INTERFACE_SWITCHPORT], wrap_width=self.terminal_width
+            )
 
     def get_switchports_raw(self) -> dict[str, str]:
         return {SHOW_INTERFACE_SWITCHPORT: self.send_command(SHOW_INTERFACE_SWITCHPORT)}

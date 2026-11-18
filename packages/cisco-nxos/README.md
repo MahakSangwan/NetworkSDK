@@ -19,10 +19,12 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | `get_facts()` | `show version \| json`, `show inventory \| json` | Model and serial are the chassis entry of `show inventory`. |
 | `get_interfaces()` | `show interface \| json` | Every interface incl. SVIs, port-channels, `mgmt0` and FEX ports; no counters or IPs. |
 | `get_ip_addresses()` | `show ip interface vrf all \| json` | One record per IPv4 address (primary, then secondaries) with its VRF; `default` is None. Unnumbered interfaces have none. |
-| `get_vlans()` | `show vlan brief \| json`, `show interface switchport \| json` | Access ports only: NX-OS lists trunk ports under each VLAN too, and they are filtered out (D41). |
+| `get_vlans()` | `show vlan brief \| json`, `show interface switchport \| json` | Access ports only, taken from `show interface switchport`: NX-OS's own VLAN port lists include trunks and are damaged on 7.3 (D41). |
 | `get_switchports()` | `show interface switchport \| json` | Layer-2 ports: mode, access/native VLAN, allowed VLANs; `1-4094` is `all_vlans_allowed`. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
+Strings the switch breaks across lines (7.3 cuts them at 255 characters and
+loses one) are never repaired: reading one raises `ParseError`.
 Lines NX-OS prints ahead of the JSON (`SB: Permission denied.` on 9.3) are
 logged at INFO and ignored. Output that isn't one complete JSON object
 raises `ParseError`, never an empty or partial model.

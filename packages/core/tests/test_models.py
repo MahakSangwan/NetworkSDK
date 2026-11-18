@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from netsdk.core import Facts, NotSupportedError, ParseError, SupportsFacts, Switchport
-from netsdk.core.parsing import parse_genie, parse_json, parse_textfsm
+from netsdk.core.parsing import DAMAGED, parse_genie, parse_json, parse_textfsm
 
 FACTS = {
     "hostname": "r1",
@@ -121,19 +121,63 @@ def test_parse_json_ignores_and_logs_lines_before_the_object(
 
 
 def wrap(text: str, width: int = 511) -> str:
-    return "\n".join(text[i : i + width] for i in range(0, len(text), width))
+    """Break every line at `width` columns, as a terminal-wrapping device does."""
+    return "\n".join(
+        line[i : i + width] for line in text.split("\n") for i in range(0, max(len(line), 1), width)
+    )
 
 
 @pytest.mark.parametrize("width", [511, 80, 7, 1])
 def test_parse_json_joins_lines_wrapped_at_the_terminal_width(width: int) -> None:
     # NX-OS 10.5 wraps one-line `| json` output every 511 columns, inside
     # strings too (live, 2026-11-13). Spaces at a break must survive.
-    data = {"header_str": "Cisco Nexus " * 60 + "\nend", "n": [1, 22, 333], "ok": True}
+    data = {
+        "header_str": "Cisco Nexus " * 60 + "\nend",
+        "q": 'a\\"b',
+        "n": [1, 22, 333],
+        "ok": True,
+    }
     one_line = json.dumps(data)
     assert len(one_line) > 511
-    assert parse_json("show version | json", "SB: x\n" + wrap(one_line, width)) == data
+    command = "show version | json"
+    assert parse_json(command, "SB: x\n" + wrap(one_line, width), wrap_width=width) == data
     indented = json.dumps(data, indent=2)
-    assert parse_json("show version | json", wrap(indented, width)) == data
+    assert parse_json(command, wrap(indented, width), wrap_width=width) == data
+
+
+def test_break_inside_a_string_off_the_terminal_width_is_damage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # NX-OS 7.3(11)N1(1) cuts long strings at 255 characters and loses one
+    # character at each cut (live, 2026-11-18): "Ethernet1/12" -> "Ethernet1" + "12".
+    output = (
+        '{\n  "ports": [\n    "Ethernet1/9-10,Ethernet1\n12,Ethernet1/15",\n'
+        '    "Ethernet1/20"\n  ],\n  "id": 5,\n  "name": "users"\n}'
+    )
+    with caplog.at_level(logging.INFO, logger="netsdk.core.parsing"):
+        data = parse_json("show vlan brief | json", output, wrap_width=511)
+    assert data == {"ports": [DAMAGED, "Ethernet1/20"], "id": 5, "name": "users"}
+    assert "1 line break(s) inside strings" in caplog.text
+
+
+def test_without_a_wrap_width_every_break_inside_a_string_is_damage() -> None:
+    assert parse_json("c", '{"a": "xy\nz", "b": "ok"}') == {"a": DAMAGED, "b": "ok"}
+
+
+def test_breaks_between_tokens_are_never_damage() -> None:
+    assert parse_json("c", '{\n"a":\n"x",\n"b"\n:\n[1,\n2]}') == {"a": "x", "b": [1, 2]}
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param('{"na\nme": "x"}', id="field-name-broken"),
+        pytest.param('{"a": "\ue000"}', id="reserved-character"),
+    ],
+)
+def test_unrecoverable_damage_is_a_parse_error(output: str) -> None:
+    with pytest.raises(ParseError):
+        parse_json("c", output, wrap_width=511)
 
 
 @pytest.mark.parametrize(
