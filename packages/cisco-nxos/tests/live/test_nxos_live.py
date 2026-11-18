@@ -40,6 +40,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_IP_INTERFACE,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VTP_STATUS,
 )
 from netsdk.cisco.nxos.parsers import rows, text, vlan_ids
 from netsdk.core import (
@@ -341,7 +342,9 @@ def test_get_ip_addresses(shared: CiscoNXOS) -> None:
 # -- layout probes (slice 4) ---------------------------------------------------
 
 #: Fields whose values are printed: modes and states, never names or numbers.
-_ENUM_KEY = re.compile(r"mode|state|status|switchport|encap|negotiat|monitor|proto", re.I)
+_ENUM_KEY = re.compile(
+    r"mode|state|status|switchport|encap|negotiat|monitor|proto|version|pruning|trap|v2", re.I
+)
 _NOT_ENUM_KEY = re.compile(r"name|desc", re.I)
 _KINDS = [
     ("empty", re.compile(r"")),
@@ -391,7 +394,7 @@ def _walk(
 
 @needs_device
 @pytest.mark.parametrize(
-    "command", [SHOW_VLAN_BRIEF, SHOW_INTERFACE_SWITCHPORT, SHOW_INTERFACE_TRUNK]
+    "command", [SHOW_VLAN_BRIEF, SHOW_INTERFACE_SWITCHPORT, SHOW_INTERFACE_TRUNK, SHOW_VTP_STATUS]
 )
 def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
     # Field paths and value kinds only; values only for mode/state fields.
