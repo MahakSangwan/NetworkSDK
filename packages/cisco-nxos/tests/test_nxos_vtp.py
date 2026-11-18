@@ -79,6 +79,13 @@ def test_server_with_updates() -> None:
     )
 
 
+@pytest.mark.parametrize("none", ["0.0.0.0", "-"])
+def test_no_address(none: str) -> None:
+    # A switch printed updater_id "-" (live, 2026-11-18).
+    vtp = parse_show_vtp_status(dumps(updater_id=none, last_modified_ip=none))
+    assert (vtp.updater_id, vtp.last_modified_by) == (None, None)
+
+
 def test_optional_fields_absent() -> None:
     vtp = parse_show_vtp_status(
         dumps(

@@ -572,7 +572,8 @@ def _vtp_flag(data: dict[str, Any], key: str, *, required: bool = False) -> bool
 
 def _vtp_address(data: dict[str, Any], key: str) -> IPv4Address | None:
     value = text(data, key)
-    if value is None:
+    # "-" (live, 2026-11-18) and 0.0.0.0 both mean "no address".
+    if value is None or value == "-":
         return None
     try:
         address = IPv4Address(value)
