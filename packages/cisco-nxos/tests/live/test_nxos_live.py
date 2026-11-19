@@ -595,6 +595,18 @@ def test_get_neighbors(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> N
     for record in caplog.records:
         if record.name.startswith("netsdk.cisco"):
             print(f"{record.levelname}: {record.getMessage()}")
+    # Diagnostic (2026-11-19): some LLDP neighbors' capabilities come as a
+    # number ("7") in JSON. Show what the text output says for up to three of
+    # them; only the capability lines are printed.
+    numeric = [
+        n for n in neighbors if n.protocol == "lldp" and any(c.isdigit() for c in n.capabilities)
+    ][:3]
+    for n in numeric:
+        assert n.local_interface
+        port = n.local_interface.removeprefix("Ethernet")
+        lines = shared.send_command(f"show lldp neighbors interface ethernet {port} detail")
+        caps = [line.strip() for line in lines.splitlines() if "apabilit" in line]
+        print(f"{n.local_interface}: JSON {','.join(n.capabilities)!r}; text: {caps}")
     interface_names = {i.name for i in shared.get_interfaces()}
     unknown = sorted({n.local_interface for n in neighbors if n.local_interface} - interface_names)
     assert not unknown, f"local interfaces that get_interfaces() doesn't list: {unknown}"
