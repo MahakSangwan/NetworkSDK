@@ -31,6 +31,7 @@ from netsdk.cisco.nxos.parsers import (
     parse_show_cdp_neighbors_detail,
     parse_show_interface,
     parse_show_interface_switchport,
+    parse_show_inventory,
     parse_show_ip_interface,
     parse_show_lldp_neighbors_detail,
     parse_show_vlan_brief,
@@ -42,6 +43,7 @@ from netsdk.core import (
     Credentials,
     Device,
     DeviceConnectionError,
+    InventoryItem,
     IPAddress,
     NetSDKError,
     NotSupportedError,
@@ -263,6 +265,15 @@ class CiscoNXOS(Device):
             if exc.output and _REJECTED in exc.output:
                 return exc.output
             raise
+
+    def get_inventory(self) -> list[InventoryItem]:
+        """Every inventory item in device order: name, description, part ID, version ID, serial."""
+        raw = self.get_inventory_raw()
+        with self._attributed():
+            return parse_show_inventory(raw[SHOW_INVENTORY], wrap_width=self.terminal_width)
+
+    def get_inventory_raw(self) -> dict[str, str]:
+        return {SHOW_INVENTORY: self.send_command(SHOW_INVENTORY)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

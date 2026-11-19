@@ -33,7 +33,7 @@ from netsdk.cisco.nxos.models import (
     NXOSSwitchport,
     NXOSVTPStatus,
 )
-from netsdk.core import Duplex, IPAddress, ParseError
+from netsdk.core import Duplex, InventoryItem, IPAddress, ParseError
 from netsdk.core.formats import KBPS_PER_UNIT
 from netsdk.core.parsing import Damaged, parse_json
 
@@ -126,7 +126,7 @@ def _chassis(inventory: dict[str, Any]) -> tuple[str, str]:
     chassis = [
         r
         for r in rows(inventory, "TABLE_inv", "ROW_inv", SHOW_INVENTORY)
-        if (text(r, "name") or "").strip('"').strip().casefold() == "chassis"
+        if (unquote(text(r, "name")) or "").casefold() == "chassis"
     ]
     if len(chassis) != 1:
         raise ParseError(f"{SHOW_INVENTORY!r} output has {len(chassis)} 'Chassis' entries, not 1")
@@ -757,3 +757,35 @@ def _neighbor_duplex(value: str | None) -> Duplex | None:
     if value is None:
         return None
     return _DUPLEX.get(value.lower())
+
+
+# -- show inventory (D45) ----------------------------------------------------
+
+
+def unquote(value: str | None) -> str | None:
+    """Drop one surrounding pair of quotes, which 10.5 adds to inventory names
+    and descriptions (D38); inner quotes stay. Empty becomes None."""
+    if value is not None and len(value) >= 2 and value[0] == value[-1] == '"':
+        value = value[1:-1].strip()
+    return value or None
+
+
+def parse_show_inventory(output: str, *, wrap_width: int | None = None) -> list[InventoryItem]:
+    """Every inventory item in device order: chassis, modules, FEX, PSUs, fans."""
+    data = parse_json(SHOW_INVENTORY, output, wrap_width=wrap_width)
+    records = rows(data, "TABLE_inv", "ROW_inv", SHOW_INVENTORY)
+    if not records:
+        raise ParseError(f"{SHOW_INVENTORY!r} output lists no items")
+    try:
+        return [
+            InventoryItem(
+                name=unquote(text(row, "name")),
+                description=unquote(text(row, "desc")),
+                part_id=text(row, "productid"),
+                version_id=text(row, "vendorid"),
+                serial_number=text(row, "serialnum"),
+            )
+            for row in records
+        ]
+    except ValidationError as exc:
+        raise ParseError(f"unexpected {SHOW_INVENTORY!r} value: {exc}") from exc

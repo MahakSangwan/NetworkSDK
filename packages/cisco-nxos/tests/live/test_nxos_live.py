@@ -601,6 +601,26 @@ def test_get_neighbors(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> N
 
 
 @needs_device
+def test_get_inventory(shared: CiscoNXOS) -> None:
+    items = shared.get_inventory()
+    # No serial numbers: this output gets pasted back for review.
+    print(f"\n{len(items)} inventory items")
+    print(f"{'name':<34} {'part id':<22} {'vid':<5} {'sn':<3} description")
+    for i in items:
+        print(
+            f"{i.name or '-':<34} {i.part_id or '-':<22} {i.version_id or '-':<5} "
+            f"{'set' if i.serial_number else '-':<3} {i.description or '-'}"
+        )
+    quoted = [i for i in items if any('"' in (v or "") for v in (i.name, i.description))]
+    print(f"items still holding quotes: {len(quoted)}")
+    serial = shared.get_facts().serial_number
+    chassis = [i for i in items if i.name == "Chassis"]
+    same = [c.serial_number for c in chassis] == [serial]
+    print(f"get_facts() serial is the Chassis item's: {same}")
+    assert items
+
+
+@needs_device
 def test_shared_session_log_is_complete_and_clean(shared: CiscoNXOS) -> None:
     # Last shared test: logs out, then checks the whole session's log.
     shared.close()

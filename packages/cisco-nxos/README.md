@@ -23,6 +23,7 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | `get_switchports()` | `show interface switchport \| json` | Layer-2 ports: mode, access/native VLAN, allowed VLANs; `1-4094` is `all_vlans_allowed`. |
 | `get_vtp_status()` | `show vtp status \| json` | Version, mode, domain, revision, pruning, traps, MD5 digest. `NotSupportedError` when VTP is off. |
 | `get_neighbors()` | `show cdp neighbors detail \| json`, `show lldp neighbors detail \| json` | One record per neighbor per local port per protocol; remote values as advertised. A protocol that is off adds nothing. |
+| `get_inventory()` | `show inventory \| json` | Every item in device order (chassis, modules, FEX, PSUs, fans); the quotes 10.5 adds are dropped. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
 Sessions use a 255-column terminal: on a wider one NX-OS 7.3 cuts lines at
