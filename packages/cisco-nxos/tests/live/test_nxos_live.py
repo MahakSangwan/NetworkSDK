@@ -638,9 +638,17 @@ def test_get_port_channels(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) 
         )
     for record in caplog.records:
         print(f"WARNING: {record.getMessage()}")
+    # Members on a removed module (flag "r", e.g. an offline FEX) are still
+    # configured but have no interface (live 7.3, 2026-11-19); nothing else may
+    # be missing.
     interface_names = {i.name for i in shared.get_interfaces()}
+    removed = {m.interface for pc in channels for m in pc.members if m.status == "r"}
     names = {pc.name for pc in channels} | {m.interface for pc in channels for m in pc.members}
-    unknown = sorted(names - interface_names)
+    print(
+        f"members on a removed module: {len(removed)}, of them not in get_interfaces(): "
+        f"{len(removed - interface_names)}"
+    )
+    unknown = sorted(names - interface_names - removed)
     assert not unknown, f"names that get_interfaces() doesn't list: {unknown}"
 
 
