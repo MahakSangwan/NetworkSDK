@@ -6,10 +6,12 @@ from typing import Literal
 from pydantic import Field
 
 from netsdk.core import (
+    LAG,
     VLAN,
     Duplex,
     Facts,
     Interface,
+    LAGMember,
     MacAddress,
     Neighbor,
     NetSDKModel,
@@ -120,3 +122,25 @@ class NXOSNeighbor(Neighbor):
     duplex: Duplex | None = None
     #: CDP `sysname`, next to the device ID NX-OS neighbors put a serial in.
     remote_system_name: str | None = None
+
+
+class NXOSPortChannelMember(LAGMember):
+    """Port-channel member plus its NX-OS flag (D46)."""
+
+    #: As printed: "P" up in port-channel, "D" down, "s" suspended,
+    #: "I" individual, "H" hot-standby, "r" module removed, ...
+    status: str
+
+
+class NXOSPortChannel(LAG):
+    """Port-channel plus what NX-OS `show port-channel summary` adds (D46)."""
+
+    #: Channel-group number.
+    group: int = Field(ge=0)
+    #: "switched" or "routed" (`S`/`R`); None when printed otherwise.
+    layer: Literal["switched", "routed"] | None = None
+    #: Status flags as printed, e.g. "U", "D", "SU".
+    status: str
+    #: Protocol as printed, e.g. "LACP", "NONE".
+    protocol_raw: str | None = None
+    members: tuple[NXOSPortChannelMember, ...] = ()

@@ -23,11 +23,14 @@ from netsdk.core.exceptions import (
 )
 from netsdk.core.formats import Duplex, MacAddress
 from netsdk.core.models import (
+    LAG,
     VLAN,
     Facts,
     Interface,
     InventoryItem,
     IPAddress,
+    LAGMember,
+    LAGProtocol,
     Neighbor,
     NeighborProtocol,
     NetSDKModel,
@@ -38,6 +41,7 @@ from netsdk.core.transports import Transport
 __version__ = "0.1.0"
 
 __all__ = [
+    "LAG",
     "VLAN",
     "AuthenticationError",
     "CommandError",
@@ -51,6 +55,8 @@ __all__ = [
     "IPAddress",
     "Interface",
     "InventoryItem",
+    "LAGMember",
+    "LAGProtocol",
     "MacAddress",
     "Neighbor",
     "NeighborProtocol",

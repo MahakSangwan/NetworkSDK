@@ -624,6 +624,27 @@ def test_get_inventory(shared: CiscoNXOS) -> None:
 
 
 @needs_device
+def test_get_port_channels(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        channels = shared.get_port_channels()
+    print(f"\n{len(channels)} port-channels")
+    print(f"{'name':<18} {'up':<3} {'protocol':<9} {'layer':<9} {'flags':<6} members (bundled/all)")
+    for pc in channels:
+        bundled = sum(m.bundled for m in pc.members)
+        flags = ",".join(sorted({m.status for m in pc.members})) or "-"
+        print(
+            f"{pc.name:<18} {pc.oper_up!s:<3.1} {pc.protocol_raw or '-':<9} {pc.layer or '-':<9} "
+            f"{pc.status:<6} {bundled}/{len(pc.members)} [{flags}]"
+        )
+    for record in caplog.records:
+        print(f"WARNING: {record.getMessage()}")
+    interface_names = {i.name for i in shared.get_interfaces()}
+    names = {pc.name for pc in channels} | {m.interface for pc in channels for m in pc.members}
+    unknown = sorted(names - interface_names)
+    assert not unknown, f"names that get_interfaces() doesn't list: {unknown}"
+
+
+@needs_device
 def test_shared_session_log_is_complete_and_clean(shared: CiscoNXOS) -> None:
     # Last shared test: logs out, then checks the whole session's log.
     shared.close()

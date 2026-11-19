@@ -145,6 +145,34 @@ class Neighbor(NetSDKModel):
     capabilities: tuple[str, ...] = ()
 
 
+LAGProtocol = Literal["lacp", "static"]
+
+
+class LAGMember(NetSDKModel):
+    """One member port of a link aggregation group."""
+
+    #: Full name, joining `Interface.name`.
+    interface: str = Field(min_length=1)
+    #: Actually carrying traffic in the bundle; False when down, suspended,
+    #: standby or running individually.
+    bundled: bool
+
+
+class LAG(NetSDKModel):
+    """A link aggregation group: port-channel, EtherChannel, aggregate, trunk.
+
+    Vendors expose it under their own name (`get_port_channels()` on Cisco);
+    the model is shared so NetBox LAGs map the same way from every vendor.
+    """
+
+    #: Full name, joining `Interface.name`, e.g. "port-channel10".
+    name: str = Field(min_length=1)
+    oper_up: bool
+    #: None when the device doesn't say.
+    protocol: LAGProtocol | None = None
+    members: tuple[LAGMember, ...] = ()
+
+
 class InventoryItem(NetSDKModel):
     """One hardware item: chassis, module, power supply, fan, transceiver, ...
 

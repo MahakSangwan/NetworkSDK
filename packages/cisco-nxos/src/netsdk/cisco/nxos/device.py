@@ -14,6 +14,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_LLDP_NEIGHBORS_DETAIL,
+    SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
@@ -23,6 +24,7 @@ from netsdk.cisco.nxos.models import (
     NXOSFacts,
     NXOSInterface,
     NXOSNeighbor,
+    NXOSPortChannel,
     NXOSSwitchport,
     NXOSVTPStatus,
 )
@@ -34,6 +36,7 @@ from netsdk.cisco.nxos.parsers import (
     parse_show_inventory,
     parse_show_ip_interface,
     parse_show_lldp_neighbors_detail,
+    parse_show_port_channel_summary,
     parse_show_vlan_brief,
     parse_show_vtp_status,
 )
@@ -274,6 +277,17 @@ class CiscoNXOS(Device):
 
     def get_inventory_raw(self) -> dict[str, str]:
         return {SHOW_INVENTORY: self.send_command(SHOW_INVENTORY)}
+
+    def get_port_channels(self) -> list[NXOSPortChannel]:
+        """Port-channels with protocol, state and each member's bundled state (D46)."""
+        raw = self.get_port_channels_raw()
+        with self._attributed():
+            return parse_show_port_channel_summary(
+                raw[SHOW_PORT_CHANNEL_SUMMARY], wrap_width=self.terminal_width
+            )
+
+    def get_port_channels_raw(self) -> dict[str, str]:
+        return {SHOW_PORT_CHANNEL_SUMMARY: self.send_command(SHOW_PORT_CHANNEL_SUMMARY)}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

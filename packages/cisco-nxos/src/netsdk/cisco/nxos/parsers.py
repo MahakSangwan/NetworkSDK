@@ -21,6 +21,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_LLDP_NEIGHBORS_DETAIL,
+    SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
@@ -30,6 +31,8 @@ from netsdk.cisco.nxos.models import (
     NXOSFacts,
     NXOSInterface,
     NXOSNeighbor,
+    NXOSPortChannel,
+    NXOSPortChannelMember,
     NXOSSwitchport,
     NXOSVTPStatus,
 )
@@ -789,3 +792,66 @@ def parse_show_inventory(output: str, *, wrap_width: int | None = None) -> list[
         ]
     except ValidationError as exc:
         raise ParseError(f"unexpected {SHOW_INVENTORY!r} value: {exc}") from exc
+
+
+# -- show port-channel summary (D46) -----------------------------------------
+
+#: Member flags meaning "carrying traffic": P up in port-channel, p up in
+#: delay-LACP mode.
+_BUNDLED = {"P", "p"}
+_LAYERS: dict[str, Literal["switched", "routed"]] = {"S": "switched", "R": "routed"}
+_LAG_PROTOCOLS: dict[str, Literal["lacp", "static"]] = {"lacp": "lacp", "none": "static"}
+
+
+def parse_show_port_channel_summary(
+    output: str, *, wrap_width: int | None = None
+) -> list[NXOSPortChannel]:
+    """Every port-channel with its members; no port-channels gives none."""
+    if not output.strip():
+        return []
+    data = parse_json(SHOW_PORT_CHANNEL_SUMMARY, output, wrap_width=wrap_width)
+    channels = []
+    for row in rows(data, "TABLE_channel", "ROW_channel", SHOW_PORT_CHANNEL_SUMMARY):
+        name = _local_name(text(row, "port-channel"))
+        status = text(row, "status")
+        group = text(row, "group")
+        if not name or status is None or group is None or not group.isdigit():
+            raise ParseError(
+                f"{SHOW_PORT_CHANNEL_SUMMARY!r} has a channel without name, status or group"
+            )
+        protocol_raw = text(row, "prtcl")
+        protocol = _LAG_PROTOCOLS.get(protocol_raw.lower()) if protocol_raw else None
+        if protocol_raw and protocol is None:
+            log.warning("%s: unrecognised port-channel protocol %r", name, protocol_raw)
+        layer = text(row, "layer")
+        members = []
+        for member in rows(row, "TABLE_member", "ROW_member", SHOW_PORT_CHANNEL_SUMMARY):
+            port, flags = _local_name(text(member, "port")), text(member, "port-status")
+            if not port or flags is None:
+                raise ParseError(
+                    f"{SHOW_PORT_CHANNEL_SUMMARY!r}: {name} has a member without port or status"
+                )
+            members.append(
+                NXOSPortChannelMember(interface=port, bundled=flags in _BUNDLED, status=flags)
+            )
+        try:
+            channels.append(
+                NXOSPortChannel(
+                    name=name,
+                    oper_up="U" in status,
+                    protocol=protocol,
+                    members=tuple(members),
+                    group=int(group),
+                    layer=_LAYERS.get(layer) if layer else None,
+                    status=status,
+                    protocol_raw=protocol_raw,
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_PORT_CHANNEL_SUMMARY!r} value for {name}: {exc}"
+            ) from exc
+    names = [c.name for c in channels]
+    if len(set(names)) != len(names):
+        raise ParseError(f"{SHOW_PORT_CHANNEL_SUMMARY!r} lists a port-channel more than once")
+    return channels
