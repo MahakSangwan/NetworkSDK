@@ -40,6 +40,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_INVENTORY,
     SHOW_IP_INTERFACE,
     SHOW_LLDP_NEIGHBORS_DETAIL,
+    SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
     SHOW_VTP_STATUS,
@@ -346,7 +347,8 @@ def test_get_ip_addresses(shared: CiscoNXOS) -> None:
 
 #: Fields whose values are printed: modes and states, never names or numbers.
 _ENUM_KEY = re.compile(
-    r"mode|state|status|switchport|encap|negotiat|monitor|proto|version|pruning|trap|v2|capab|duplex",
+    r"mode|state|status|switchport|encap|negotiat|monitor|proto|version|pruning|trap|v2|capab|duplex"
+    r"|type|flag|layer",
     re.I,
 )
 _NOT_ENUM_KEY = re.compile(r"name|desc|platform|addr|id$|ver(sion)?_?str", re.I)
@@ -406,6 +408,7 @@ def _walk(
         SHOW_VTP_STATUS,
         SHOW_CDP_NEIGHBORS_DETAIL,
         SHOW_LLDP_NEIGHBORS_DETAIL,
+        SHOW_PORT_CHANNEL_SUMMARY,
     ],
 )
 def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
