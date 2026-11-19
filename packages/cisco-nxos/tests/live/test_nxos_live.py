@@ -670,7 +670,16 @@ def test_get_vpc_status(shared: CiscoNXOS) -> None:
     for v in vpc.vpcs[:15]:
         check = f"{v.consistency} / {v.consistency_reason}"
         print(f"  vpc {v.vpc_id:<5} {v.port_channel:<18} up {v.up!s:<5} {check}")
-    channels = {pc.name for pc in shared.get_port_channels()}
+    port_channels = {pc.name: pc for pc in shared.get_port_channels()}
+    channels = set(port_channels)
+    # Reported, not asserted: does a vPC's "up" match its port-channel's
+    # oper_up? On 7.3 every vPC read as down while some port-channels are up.
+    mismatched = [
+        f"{v.port_channel} (vpc up {v.up}, port-channel up {port_channels[v.port_channel].oper_up})"
+        for v in vpc.vpcs
+        if v.port_channel in port_channels and v.up != port_channels[v.port_channel].oper_up
+    ]
+    print(f"vPCs whose up differs from their port-channel: {mismatched or 'none'}")
     names = {v.port_channel for v in vpc.vpcs} | (
         {vpc.peer_link.port_channel} if vpc.peer_link else set()
     )
