@@ -140,6 +140,13 @@ def test_lldp_optional_values(
     assert (n.management_addresses, n.native_vlan) == (addresses, vlan)
 
 
+@pytest.mark.parametrize("value", ["7", "not advertised"])
+def test_lldp_capabilities_not_advertised(value: str) -> None:
+    # JSON prints "7" where the text output says "not advertised" (live, 2026-11-19).
+    (n,) = parse_show_lldp_neighbors_detail(lldp(LLDP_ROW | {"enabled_capability": value}))
+    assert n.capabilities == ()
+
+
 def test_lldp_count_must_match() -> None:
     with pytest.raises(ParseError, match="says 2 neighbors but lists 1"):
         parse_show_lldp_neighbors_detail(lldp(LLDP_ROW, count=2))

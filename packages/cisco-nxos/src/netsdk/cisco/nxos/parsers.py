@@ -728,8 +728,13 @@ def _cdp_capabilities(value: Any) -> tuple[str, ...]:
     return tuple(i.strip().lower() for i in items if i.strip())
 
 
+#: What JSON prints where the text output says "not advertised" (live,
+#: 2026-11-19: 3 of 3 neighbors checked).
+_LLDP_NOT_ADVERTISED = {"7", "not advertised"}
+
+
 def _lldp_capabilities(value: str | None) -> tuple[str, ...]:
-    if value is None:
+    if value is None or value.strip().lower() in _LLDP_NOT_ADVERTISED:
         return ()
     names = []
     for code in (c.strip() for c in value.split(",") if c.strip()):
