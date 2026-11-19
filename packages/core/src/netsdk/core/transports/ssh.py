@@ -133,6 +133,10 @@ def render_terminal(text: str) -> str:
     plus an erase-line escape (`ESC[K`); this turns raw channel data into what
     a person would have seen. Other escape sequences (colours, reverse video)
     are dropped. Line endings are normalized to `\\n`.
+
+    Spaces an erase leaves past the end of what was written afterwards are
+    dropped; text that was written is kept as is, trailing spaces included
+    (a description ending in a space at the wrap column must keep it).
     """
     text = re.sub(r"\r+\n", "\n", text)
     lines = []
@@ -141,14 +145,16 @@ def render_terminal(text: str) -> str:
             lines.append(line)
             continue
         screen: list[str] = []
-        cursor = 0
+        cursor = written = 0
         for part in _ESCAPE.split(line):
             if part.startswith("\x1b"):
                 if part.endswith("K"):  # erase from the cursor to the end of the line
                     del screen[cursor:]
+                    written = min(written, cursor)
                 continue
-            cursor = _draw(screen, cursor, part)
-        lines.append("".join(screen).rstrip())
+            cursor, written = _draw(screen, cursor, written, part)
+        kept = "".join(screen[:written])
+        lines.append(kept + "".join(screen[written:]).rstrip(" "))
     return "\n".join(lines)
 
 
@@ -156,12 +162,14 @@ def render_terminal(text: str) -> str:
 _ESCAPE = re.compile(r"(\x1b\[[0-9;?]*[@-~])")
 
 
-def _draw(screen: list[str], cursor: int, text: str) -> int:
+def _draw(screen: list[str], cursor: int, written: int, text: str) -> tuple[int, int]:
+    """Draw `text`; `written` is how far text reached since the cursor last moved left."""
     for char in text:
         if char == "\r":
-            cursor = 0
+            cursor = written = 0
         elif char == "\b":
             cursor = max(cursor - 1, 0)
+            written = cursor
         else:
             if cursor < len(screen):
                 screen[cursor] = char
@@ -169,7 +177,8 @@ def _draw(screen: list[str], cursor: int, text: str) -> int:
                 screen.extend(" " * (cursor - len(screen)))
                 screen.append(char)
             cursor += 1
-    return cursor
+            written = max(written, cursor)
+    return cursor, written
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

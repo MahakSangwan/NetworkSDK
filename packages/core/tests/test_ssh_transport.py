@@ -66,6 +66,14 @@ def test_satisfies_transport_protocol(tmp_path: Path) -> None:
         ("\x1b[1mbold\x1b[0m text", "bold text"),
         ("abcdef\r\x1b[Kxy", "xy"),
         ("abcdef\b\b\b\x1b[K", "abc"),
+        # Text written after an erase keeps its trailing space (live 9.3/10.5,
+        # 2026-11-19: a description with a space at the wrap column).
+        ("--More--\r        \rab ", "ab "),
+        ("\x1b[7m--More--\x1b[27m\r\x1b[Kab ", "ab "),
+        (" --More-- " + "\b" * 9 + " " * 8 + "\b" * 9 + "ab ", "ab "),
+        # Leftover erase spaces past the new text still go.
+        (" --More-- " + "\b" * 9 + " " * 8 + "\b" * 9 + "ab", "ab"),
+        ("abc   \x1b[0m", "abc   "),
     ],
 )
 def test_render_terminal(raw: str, expected: str) -> None:

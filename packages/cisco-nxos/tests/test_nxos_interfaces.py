@@ -233,3 +233,47 @@ def test_get_interfaces_sends_only_show_interface(
     assert len(interfaces) == 62
     assert [w for w in conn.writes if w != " "] == [f"{SHOW_INTERFACE}\n", "exit\n"]
     assert conn.writes.count(" ") == len(pages) - 1
+
+
+@pytest.mark.parametrize(
+    ("pager", "erase"),
+    [
+        pytest.param("\x1b[7m--More--\x1b[27m", "\r\x1b[K", id="erase-line"),
+        pytest.param("--More--", "\r        \r", id="spaces"),
+        pytest.param(" --More-- ", "\b" * 9 + " " * 8 + "\b" * 9, id="backspaces"),
+    ],
+)
+def test_space_at_the_wrap_column_after_a_page_break_survives(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pager: str, erase: str
+) -> None:
+    # Live 9.3/10.5, 2026-11-19: the row after a pager prompt ended in a
+    # description's space at column 255; the space was stripped, the row came
+    # out 254 long and the value was taken for damaged.
+    width = NXOS_TERMINAL_WIDTH
+    records = [
+        ETH | {"interface": f"Ethernet1/{n}", "desc": "uplink to core " * 3} for n in range(1, 80)
+    ]
+    # Shift the text with a filler field until a row right after a page break
+    # ends in a space inside a description.
+    for pad in range(width):
+        data = {"filler": "x" * pad, "TABLE_interface": {"ROW_interface": records}}
+        one_line = json.dumps(data)
+        rows = [one_line[i : i + width] for i in range(0, len(one_line), width)]
+        # The last column of each row right after a page break: a space
+        # inside a string there (odd number of quotes before it) is the case.
+        ends = [(i + 1) * width - 1 for i in range(23, len(rows), 23)]
+        if any(
+            p < len(one_line) and one_line[p] == " " and one_line[:p].count('"') % 2 == 1
+            for p in ends
+        ):
+            break
+    else:
+        pytest.fail("no padding puts a space at the wrap column after a page break")
+    pages = ["".join(f"{row}\r\n" for row in rows[i : i + 23]) for i in range(0, len(rows), 23)]
+    conn = FakeCLI(
+        {SHOW_INTERFACE: pages}, hostname="sw1", terminator="# ", pager=pager, erase=erase
+    ).connection()
+    with make_device(monkeypatch, tmp_path, conn) as device:
+        interfaces = device.get_interfaces()
+    assert len(interfaces) == 79
+    assert {i.description for i in interfaces} == {("uplink to core " * 3).strip()}
