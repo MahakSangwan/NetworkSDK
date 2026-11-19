@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from netsdk.cisco.nxos.commands import (
     SHOW_CDP_NEIGHBORS_DETAIL,
+    SHOW_FEX_DETAIL,
     SHOW_INTERFACE,
     SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
@@ -28,9 +29,11 @@ from netsdk.cisco.nxos.commands import (
     SHOW_VTP_STATUS,
 )
 from netsdk.cisco.nxos.models import (
+    NXOSFEX,
     NXOSVLAN,
     NXOSVPC,
     NXOSFacts,
+    NXOSFEXFabricPort,
     NXOSInterface,
     NXOSNeighbor,
     NXOSPortChannel,
@@ -955,3 +958,62 @@ def _vpc(row: dict[str, Any]) -> NXOSVPC:
         consistency=text(row, "vpc-consistency"),
         consistency_reason=text(row, "vpc-consistency-status"),
     )
+
+
+# -- show fex detail (D48) ---------------------------------------------------
+
+_FABRIC_UP = {"up": True, "down": False}
+
+
+def parse_show_fex_detail(output: str, *, wrap_width: int | None = None) -> list[NXOSFEX]:
+    """Every FEX the switch lists; one it no longer sees isn't listed at all."""
+    if not output.strip():
+        return []
+    data = parse_json(SHOW_FEX_DETAIL, output, wrap_width=wrap_width)
+    fexes = []
+    for row in rows(data, "TABLE_fex_info", "ROW_fex_info", SHOW_FEX_DETAIL):
+        fex_id, state = text(row, "chas_id"), text(row, "fex_state")
+        if fex_id is None or not fex_id.isdigit() or state is None:
+            raise ParseError(f"{SHOW_FEX_DETAIL!r} has a FEX without a numeric ID or a state")
+        fabric = []
+        for port in rows(row, "TABLE_fbr_state", "ROW_fbr_state", SHOW_FEX_DETAIL):
+            name, oper = _local_name(text(port, "fbr_index")), text(port, "fbr_oper_state")
+            if not name or oper is None or oper.lower() not in _FABRIC_UP:
+                raise ParseError(
+                    f"{SHOW_FEX_DETAIL!r}: FEX {fex_id} fabric port {name!r} is {oper!r}"
+                )
+            fabric.append(
+                NXOSFEXFabricPort(
+                    interface=name, up=_FABRIC_UP[oper.lower()], state=text(port, "fsm_state")
+                )
+            )
+        hosts = [
+            _local_name(text(port, "fex_port"))
+            for port in rows(row, "TABLE_fex_port", "ROW_fex_port", SHOW_FEX_DETAIL)
+        ]
+        if not all(hosts):
+            raise ParseError(f"{SHOW_FEX_DETAIL!r}: FEX {fex_id} has a host port without a name")
+        max_links = text(row, "max_link")
+        try:
+            fexes.append(
+                NXOSFEX(
+                    fex_id=int(fex_id),
+                    description=unquote(text(row, "descr")),
+                    model=text(row, "model"),
+                    part_id=text(row, "part_no"),
+                    serial_number=text(row, "serial"),
+                    software_version=text(row, "fex_ver"),
+                    fabric_port_channel=_local_name(text(row, "fbr_port_control")),
+                    fabric_interfaces=tuple(fabric),
+                    host_interfaces=tuple(h for h in hosts if h),
+                    pinning_mode=text(row, "pin_mode"),
+                    max_links=int(max_links) if max_links and max_links.isdigit() else None,
+                    online=state == "Online",
+                    state=state,
+                )
+            )
+        except ValidationError as exc:
+            raise ParseError(
+                f"unexpected {SHOW_FEX_DETAIL!r} value for FEX {fex_id}: {exc}"
+            ) from exc
+    return fexes

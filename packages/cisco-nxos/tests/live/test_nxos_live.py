@@ -692,6 +692,32 @@ def test_get_vpc_status(shared: CiscoNXOS) -> None:
 
 
 @needs_device
+def test_get_fexes(shared: CiscoNXOS) -> None:
+    try:
+        fexes = shared.get_fexes()
+    except NotSupportedError as exc:
+        pytest.skip(f"no FEX: {exc}")
+    # No serials or descriptions: this output gets pasted back for review.
+    print(f"\n{len(fexes)} FEXes")
+    header = f"{'id':>4} {'state':<10} {'model':<18} {'fabric pc':<17} {'fabric up/all':<13}"
+    print(f"{header} {'host':>4} pin")
+    for f in fexes:
+        up = sum(p.up for p in f.fabric_interfaces)
+        print(
+            f"{f.fex_id:>4} {f.state:<10} {f.model or '-':<18} {f.fabric_port_channel or '-':<17} "
+            f"{up}/{len(f.fabric_interfaces):<11} {len(f.host_interfaces):>4} {f.pinning_mode}"
+        )
+    names = {i.name for i in shared.get_interfaces()}
+    channels = {pc.name for pc in shared.get_port_channels()}
+    hosts = {h for f in fexes for h in f.host_interfaces}
+    fabric = {p.interface for f in fexes for p in f.fabric_interfaces}
+    print(f"host ports not in get_interfaces(): {len(hosts - names)} of {len(hosts)}")
+    fabric_pcs = {f.fabric_port_channel for f in fexes if f.fabric_port_channel}
+    missing = sorted((fabric - names) | (fabric_pcs - channels))
+    assert not missing, f"fabric ports or port-channels the other getters don't list: {missing}"
+
+
+@needs_device
 def test_shared_session_log_is_complete_and_clean(shared: CiscoNXOS) -> None:
     # Last shared test: logs out, then checks the whole session's log.
     shared.close()

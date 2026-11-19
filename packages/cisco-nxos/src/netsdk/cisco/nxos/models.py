@@ -201,3 +201,38 @@ class NXOSVPCStatus(NetSDKModel):
     peer_gateway: str | None = None
     peer_link: NXOSVPCPeerLink | None = None
     vpcs: tuple[NXOSVPC, ...] = ()
+
+
+class NXOSFEXFabricPort(NetSDKModel):
+    """One parent-switch port a FEX is attached through (D48)."""
+
+    #: Full name, joining `Interface.name`.
+    interface: str = Field(min_length=1)
+    up: bool
+    #: As printed: "Active", "Configured", ...
+    state: str | None = None
+
+
+class NXOSFEX(NetSDKModel):
+    """A Fabric Extender attached to this switch (D48): configuration plus a
+    health flag. Cisco-only, so it has no core model."""
+
+    fex_id: int = Field(ge=0)
+    description: str | None = None
+    model: str | None = None
+    part_id: str | None = None
+    serial_number: str | None = None
+    #: As printed.
+    software_version: str | None = None
+    #: Full name, e.g. "port-channel101"; None when the FEX uses no port-channel.
+    fabric_port_channel: str | None = None
+    fabric_interfaces: tuple[NXOSFEXFabricPort, ...] = ()
+    #: The FEX's own ports, full names ("Ethernet101/1/1", ...).
+    host_interfaces: tuple[str, ...] = ()
+    #: As printed: "static", ...
+    pinning_mode: str | None = None
+    max_links: int | None = Field(default=None, ge=0)
+    #: True only for "Online".
+    online: bool
+    #: As printed: "Online", "Offline", "Discovered", ...
+    state: str

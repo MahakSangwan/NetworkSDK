@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from netsdk.cisco.nxos.commands import (
     SHOW_CDP_NEIGHBORS_DETAIL,
+    SHOW_FEX_DETAIL,
     SHOW_INTERFACE,
     SHOW_INTERFACE_SWITCHPORT,
     SHOW_INVENTORY,
@@ -21,6 +22,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_VTP_STATUS,
 )
 from netsdk.cisco.nxos.models import (
+    NXOSFEX,
     NXOSVLAN,
     NXOSFacts,
     NXOSInterface,
@@ -33,6 +35,7 @@ from netsdk.cisco.nxos.models import (
 from netsdk.cisco.nxos.parsers import (
     parse_facts,
     parse_show_cdp_neighbors_detail,
+    parse_show_fex_detail,
     parse_show_interface,
     parse_show_interface_switchport,
     parse_show_inventory,
@@ -304,6 +307,18 @@ class CiscoNXOS(Device):
 
     def get_vpc_status_raw(self) -> dict[str, str]:
         return {SHOW_VPC: self._send_if_supported(SHOW_VPC, "vPC is not enabled")}
+
+    def get_fexes(self) -> list[NXOSFEX]:
+        """Attached FEXes: ID, model, serial, fabric and host ports, online (D48).
+
+        Raises NotSupportedError when the switch rejects the command (FEX off).
+        """
+        raw = self.get_fexes_raw()
+        with self._attributed():
+            return parse_show_fex_detail(raw[SHOW_FEX_DETAIL], wrap_width=self.terminal_width)
+
+    def get_fexes_raw(self) -> dict[str, str]:
+        return {SHOW_FEX_DETAIL: self._send_if_supported(SHOW_FEX_DETAIL, "FEX is not enabled")}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:

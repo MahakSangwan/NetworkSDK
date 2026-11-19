@@ -26,6 +26,7 @@ with CiscoNXOS("10.0.0.1", creds) as device:
 | `get_inventory()` | `show inventory \| json` | Every item in device order (chassis, modules, FEX, PSUs, fans); the quotes 10.5 adds are dropped. |
 | `get_port_channels()` | `show port-channel summary \| json` | Core `LAG` model: state, LACP or static, each member's bundled state; group, layer and raw flags as extras. |
 | `get_vpc_status()` | `show vpc \| json` | Domain, role, peer-link, each vPC's port-channel; peer, keepalive, consistency and up/down as health flags. `NotSupportedError` when vPC is off. |
+| `get_fexes()` | `show fex detail \| json` | Each attached FEX: ID, model, serial, fabric port-channel and ports, host ports, `online`. A FEX the switch no longer sees isn't listed. `NotSupportedError` when FEX is off. |
 
 Commands are sent with `| json` and read as JSON (D38): no text parsing.
 Sessions use a 255-column terminal: on a wider one NX-OS 7.3 cuts lines at
