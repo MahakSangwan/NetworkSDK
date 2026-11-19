@@ -144,3 +144,60 @@ class NXOSPortChannel(LAG):
     #: Protocol as printed, e.g. "LACP", "NONE".
     protocol_raw: str | None = None
     members: tuple[NXOSPortChannelMember, ...] = ()
+
+
+class NXOSVPC(NetSDKModel):
+    """One vPC: its ID, port-channel and health (D47)."""
+
+    vpc_id: int = Field(ge=0)
+    #: Full name, joining `Interface.name`.
+    port_channel: str = Field(min_length=1)
+    up: bool
+    #: None when NX-OS didn't check ("not-applicable").
+    consistent: bool | None = None
+    #: As printed: "consistent", "inconsistent", "not-applicable".
+    consistency: str | None = None
+    #: As printed: "SUCCESS" or why the check failed or wasn't done.
+    consistency_reason: str | None = None
+
+
+class NXOSVPCPeerLink(NetSDKModel):
+    """The vPC peer-link."""
+
+    #: Full name, joining `Interface.name`.
+    port_channel: str = Field(min_length=1)
+    link_id: int | None = None
+    up: bool
+
+
+class NXOSVPCStatus(NetSDKModel):
+    """vPC domain from NX-OS `show vpc` (D47): configuration plus health flags.
+
+    Cisco-only, so it has no core model. Each flag keeps its raw string; the
+    VLAN up-bitsets are left out (operational detail).
+    """
+
+    domain_id: int = Field(ge=0)
+    #: As printed: "primary", "secondary", "primary-secondary" (operational
+    #: primary, configured secondary), ...
+    role: str
+    #: True only for "peer-ok".
+    peer_ok: bool
+    peer_status: str
+    peer_status_reason: str | None = None
+    #: True only for "peer-alive".
+    keepalive_alive: bool
+    keepalive_status: str
+    #: Type-1 (global) consistency; None when not checked.
+    peer_consistent: bool | None = None
+    peer_consistency_reason: str | None = None
+    type2_consistent: bool | None = None
+    type2_consistency_reason: str | None = None
+    per_vlan_consistent: bool | None = None
+    graceful_consistency_check: bool | None = None
+    #: As printed: "Disabled", or a phrase with timers on some releases.
+    auto_recovery: str | None = None
+    #: As printed: a number or a word, depending on the release.
+    peer_gateway: str | None = None
+    peer_link: NXOSVPCPeerLink | None = None
+    vpcs: tuple[NXOSVPC, ...] = ()

@@ -24,16 +24,20 @@ from netsdk.cisco.nxos.commands import (
     SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VPC,
     SHOW_VTP_STATUS,
 )
 from netsdk.cisco.nxos.models import (
     NXOSVLAN,
+    NXOSVPC,
     NXOSFacts,
     NXOSInterface,
     NXOSNeighbor,
     NXOSPortChannel,
     NXOSPortChannelMember,
     NXOSSwitchport,
+    NXOSVPCPeerLink,
+    NXOSVPCStatus,
     NXOSVTPStatus,
 )
 from netsdk.core import Duplex, InventoryItem, IPAddress, ParseError
@@ -51,21 +55,26 @@ _EMPTY = {"", "N/A", "n/a"}
 def rows(data: dict[str, Any], table: str, row: str, command: str) -> list[dict[str, Any]]:
     """The records of an NX-OS `TABLE_x` / `ROW_x` pair, always as a list.
 
-    NX-OS prints a single record as an object instead of a one-item list, and
-    leaves the table out when it has no records.
+    NX-OS prints a single record as an object instead of a one-item list,
+    leaves the table out when it has no records, and 7.3 splits long tables
+    into a list of chunks (`TABLE_x: [{ROW_x: [...]}, {ROW_x: [...]}]`),
+    which are joined in order.
     """
     block = data.get(table)
     if block is None:
         return []
-    if not isinstance(block, dict):
-        raise ParseError(f"{command!r} output: {table} is not an object")
-    records = block.get(row)
-    if records is None:
-        return []
-    if isinstance(records, dict):
-        records = [records]
-    if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
-        raise ParseError(f"{command!r} output: {table}.{row} is not a list of objects")
+    chunks = block if isinstance(block, list) else [block]
+    records: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            raise ParseError(f"{command!r} output: {table} is not an object or a list of them")
+        found = chunk.get(row)
+        if found is None:
+            continue
+        items = [found] if isinstance(found, dict) else found
+        if not isinstance(items, list) or not all(isinstance(r, dict) for r in items):
+            raise ParseError(f"{command!r} output: {table}.{row} is not a list of objects")
+        records.extend(items)
     return records
 
 
@@ -855,3 +864,94 @@ def parse_show_port_channel_summary(
     if len(set(names)) != len(names):
         raise ParseError(f"{SHOW_PORT_CHANNEL_SUMMARY!r} lists a port-channel more than once")
     return channels
+
+
+# -- show vpc (D47) ----------------------------------------------------------
+
+#: Port states: numbers on 9.3/10.5, words on 7.3(11)N1(1) (live, 2026-11-19).
+_PORT_STATE = {"1": True, "enabled": True, "up": True, "0": False, "disabled": False, "down": False}
+_CONSISTENCY = {"consistent": True, "inconsistent": False, "not-applicable": None}
+
+
+def parse_show_vpc(output: str, *, wrap_width: int | None = None) -> NXOSVPCStatus:
+    data = parse_json(SHOW_VPC, output, wrap_width=wrap_width)
+    domain = text(data, "vpc-domain-id")
+    if domain is None or not domain.isdigit():
+        raise ParseError(f"{SHOW_VPC!r}: vpc-domain-id is {domain!r}, not a number")
+    peer_status = _vpc_required(data, "vpc-peer-status")
+    keepalive = _vpc_required(data, "vpc-peer-keepalive-status")
+    peer_links = rows(data, "TABLE_peerlink", "ROW_peerlink", SHOW_VPC)
+    if len(peer_links) > 1:
+        raise ParseError(f"{SHOW_VPC!r} lists {len(peer_links)} peer-links")
+    graceful = text(data, "vpc-graceful-consistency-check-status")
+    try:
+        return NXOSVPCStatus(
+            domain_id=int(domain),
+            role=_vpc_required(data, "vpc-role"),
+            peer_ok=peer_status == "peer-ok",
+            peer_status=peer_status,
+            peer_status_reason=text(data, "vpc-peer-status-reason"),
+            keepalive_alive=keepalive == "peer-alive",
+            keepalive_status=keepalive,
+            peer_consistent=_consistent(data, "vpc-peer-consistency"),
+            peer_consistency_reason=text(data, "vpc-peer-consistency-status"),
+            type2_consistent=_consistent(data, "vpc-type-2-consistency"),
+            type2_consistency_reason=text(data, "vpc-type-2-consistency-status"),
+            per_vlan_consistent=_consistent(data, "vpc-per-vlan-peer-consistency"),
+            graceful_consistency_check=None if graceful is None else graceful.lower() == "enabled",
+            auto_recovery=text(data, "vpc-auto-recovery-status"),
+            peer_gateway=text(data, "peer-gateway"),
+            peer_link=_peer_link(peer_links[0]) if peer_links else None,
+            vpcs=tuple(_vpc(row) for row in rows(data, "TABLE_vpc", "ROW_vpc", SHOW_VPC)),
+        )
+    except ValidationError as exc:
+        raise ParseError(f"unexpected {SHOW_VPC!r} value: {exc}") from exc
+
+
+def _vpc_required(data: dict[str, Any], key: str) -> str:
+    value = text(data, key)
+    if value is None:
+        raise ParseError(f"{SHOW_VPC!r} output has no {key}")
+    return value
+
+
+def _consistent(data: dict[str, Any], key: str) -> bool | None:
+    value = text(data, key)
+    if value is None:
+        return None
+    if value.lower() not in _CONSISTENCY:
+        raise ParseError(f"{SHOW_VPC!r}: {key} is {value!r}")
+    return _CONSISTENCY[value.lower()]
+
+
+def _port_up(row: dict[str, Any], key: str) -> bool:
+    value = text(row, key)
+    if value is None or value.lower() not in _PORT_STATE:
+        raise ParseError(f"{SHOW_VPC!r}: {key} is {value!r}, not a known port state")
+    return _PORT_STATE[value.lower()]
+
+
+def _peer_link(row: dict[str, Any]) -> NXOSVPCPeerLink:
+    name = _local_name(text(row, "peerlink-ifindex"))
+    link_id = text(row, "peer-link-id")
+    if not name:
+        raise ParseError(f"{SHOW_VPC!r}: the peer-link has no port-channel")
+    return NXOSVPCPeerLink(
+        port_channel=name,
+        link_id=int(link_id) if link_id and link_id.isdigit() else None,
+        up=_port_up(row, "peer-link-port-state"),
+    )
+
+
+def _vpc(row: dict[str, Any]) -> NXOSVPC:
+    vpc_id, name = text(row, "vpc-id"), _local_name(text(row, "vpc-ifindex"))
+    if vpc_id is None or not vpc_id.isdigit() or not name:
+        raise ParseError(f"{SHOW_VPC!r} has a vPC without a numeric ID or a port-channel")
+    return NXOSVPC(
+        vpc_id=int(vpc_id),
+        port_channel=name,
+        up=_port_up(row, "vpc-port-state"),
+        consistent=_consistent(row, "vpc-consistency"),
+        consistency=text(row, "vpc-consistency"),
+        consistency_reason=text(row, "vpc-consistency-status"),
+    )

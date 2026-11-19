@@ -164,6 +164,12 @@ def test_rejected_json_pipe_is_a_parse_error() -> None:
         pytest.param({"TABLE_x": {"ROW_x": {"a": 1}}}, [{"a": 1}], id="single-object"),
         pytest.param({}, [], id="no-table"),
         pytest.param({"TABLE_x": {}}, [], id="no-rows"),
+        pytest.param(
+            {"TABLE_x": [{"ROW_x": [{"a": 1}, {"a": 2}]}, {"ROW_x": {"a": 3}}]},
+            [{"a": 1}, {"a": 2}, {"a": 3}],
+            id="chunks",
+        ),
+        pytest.param({"TABLE_x": []}, [], id="no-chunks"),
     ],
 )
 def test_rows(data: dict[str, Any], expected: list[dict[str, Any]]) -> None:
@@ -173,7 +179,8 @@ def test_rows(data: dict[str, Any], expected: list[dict[str, Any]]) -> None:
 @pytest.mark.parametrize(
     "data",
     [
-        pytest.param({"TABLE_x": []}, id="table-not-object"),
+        pytest.param({"TABLE_x": "text"}, id="table-not-object"),
+        pytest.param({"TABLE_x": [{"ROW_x": {"a": 1}}, 5]}, id="chunk-not-object"),
         pytest.param({"TABLE_x": {"ROW_x": "text"}}, id="rows-not-objects"),
         pytest.param({"TABLE_x": {"ROW_x": [{"a": 1}, 2]}}, id="mixed-rows"),
     ],

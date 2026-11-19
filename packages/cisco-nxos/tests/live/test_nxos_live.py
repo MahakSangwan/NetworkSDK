@@ -655,6 +655,30 @@ def test_get_port_channels(shared: CiscoNXOS, caplog: pytest.LogCaptureFixture) 
 
 
 @needs_device
+def test_get_vpc_status(shared: CiscoNXOS) -> None:
+    try:
+        vpc = shared.get_vpc_status()
+    except NotSupportedError as exc:
+        pytest.skip(f"no vPC: {exc}")
+    # No domain ID: this output gets pasted back for review.
+    shown = vpc.model_dump(exclude={"domain_id", "vpcs", "peer_link"})
+    print("\n" + "\n".join(f"{name}: {value}" for name, value in shown.items()))
+    print(f"peer_link: {vpc.peer_link}")
+    up = sum(v.up for v in vpc.vpcs)
+    consistent = sum(v.consistent is True for v in vpc.vpcs)
+    print(f"{len(vpc.vpcs)} vPCs: {up} up, {consistent} consistent")
+    for v in vpc.vpcs[:15]:
+        check = f"{v.consistency} / {v.consistency_reason}"
+        print(f"  vpc {v.vpc_id:<5} {v.port_channel:<18} up {v.up!s:<5} {check}")
+    channels = {pc.name for pc in shared.get_port_channels()}
+    names = {v.port_channel for v in vpc.vpcs} | (
+        {vpc.peer_link.port_channel} if vpc.peer_link else set()
+    )
+    unknown = sorted(names - channels)
+    assert not unknown, f"vPC port-channels that get_port_channels() doesn't list: {unknown}"
+
+
+@needs_device
 def test_shared_session_log_is_complete_and_clean(shared: CiscoNXOS) -> None:
     # Last shared test: logs out, then checks the whole session's log.
     shared.close()

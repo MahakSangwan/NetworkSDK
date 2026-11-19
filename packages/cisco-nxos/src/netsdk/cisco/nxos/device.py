@@ -17,6 +17,7 @@ from netsdk.cisco.nxos.commands import (
     SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VERSION,
     SHOW_VLAN_BRIEF,
+    SHOW_VPC,
     SHOW_VTP_STATUS,
 )
 from netsdk.cisco.nxos.models import (
@@ -26,6 +27,7 @@ from netsdk.cisco.nxos.models import (
     NXOSNeighbor,
     NXOSPortChannel,
     NXOSSwitchport,
+    NXOSVPCStatus,
     NXOSVTPStatus,
 )
 from netsdk.cisco.nxos.parsers import (
@@ -38,6 +40,7 @@ from netsdk.cisco.nxos.parsers import (
     parse_show_lldp_neighbors_detail,
     parse_show_port_channel_summary,
     parse_show_vlan_brief,
+    parse_show_vpc,
     parse_show_vtp_status,
 )
 from netsdk.cisco.nxos.transport import NXOS_TERMINAL_WIDTH, NXOSSSHTransport
@@ -288,6 +291,19 @@ class CiscoNXOS(Device):
 
     def get_port_channels_raw(self) -> dict[str, str]:
         return {SHOW_PORT_CHANNEL_SUMMARY: self.send_command(SHOW_PORT_CHANNEL_SUMMARY)}
+
+    def get_vpc_status(self) -> NXOSVPCStatus:
+        """vPC domain, role, peer-link and vPCs, with peer, keepalive and
+        consistency health flags (D47).
+
+        Raises NotSupportedError when the switch rejects the command (vPC off).
+        """
+        raw = self.get_vpc_status_raw()
+        with self._attributed():
+            return parse_show_vpc(raw[SHOW_VPC], wrap_width=self.terminal_width)
+
+    def get_vpc_status_raw(self) -> dict[str, str]:
+        return {SHOW_VPC: self._send_if_supported(SHOW_VPC, "vPC is not enabled")}
 
     @contextmanager
     def _attributed(self) -> Iterator[None]:
