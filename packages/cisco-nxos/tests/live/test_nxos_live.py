@@ -705,12 +705,14 @@ def test_get_fexes(shared: CiscoNXOS) -> None:
         up = sum(p.up for p in f.fabric_interfaces)
         print(
             f"{f.fex_id:>4} {f.state:<10} {f.model or '-':<18} {f.fabric_port_channel or '-':<17} "
-            f"{up}/{len(f.fabric_interfaces):<11} {len(f.host_interfaces):>4} {f.pinning_mode}"
+            f"{up}/{len(f.fabric_interfaces):<11} {len(f.host_interfaces):>4} {f.pinning_mode} "
+            f"control {f.control_fabric_port or '-'}"
         )
     names = {i.name for i in shared.get_interfaces()}
     channels = {pc.name for pc in shared.get_port_channels()}
     hosts = {h for f in fexes for h in f.host_interfaces}
     fabric = {p.interface for f in fexes for p in f.fabric_interfaces}
+    fabric |= {f.control_fabric_port for f in fexes if f.control_fabric_port}
     print(f"host ports not in get_interfaces(): {len(hosts - names)} of {len(hosts)}")
     fabric_pcs = {f.fabric_port_channel for f in fexes if f.fabric_port_channel}
     missing = sorted((fabric - names) | (fabric_pcs - channels))

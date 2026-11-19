@@ -27,7 +27,8 @@ def fex(fex_id: int, state: str = "Online", ports: int = 3, **extra: Any) -> dic
         "post_level": "complete",
         "pin_mode": "static",
         "max_link": "1",
-        "fbr_port_control": f"Po{fex_id}",
+        # The fabric port for control traffic, not the port-channel (live, 2026-11-19).
+        "fbr_port_control": "Eth1/1",
         "mac": "00:11:22:33:44:55",
         "num_macs": "64",
         "model": "N2K-C2248TP-1GE",
@@ -36,6 +37,7 @@ def fex(fex_id: int, state: str = "Online", ports: int = 3, **extra: Any) -> dic
         "card_id": "99",
         "TABLE_fbr_state": {
             "ROW_fbr_state": [
+                {"fbr_index": f"Po{fex_id}", "fbr_oper_state": "Up", "fsm_state": "Active"},
                 {"fbr_index": "Eth1/1", "fbr_oper_state": "Up", "fsm_state": "Active"},
                 {"fbr_index": "Eth1/2", "fbr_oper_state": "Down", "fsm_state": "Configured"},
             ]
@@ -62,7 +64,9 @@ def test_online_fex() -> None:
         serial_number="SSI0000101",
         software_version="7.3(11)N1(1)",
         fabric_port_channel="port-channel101",
+        control_fabric_port="Ethernet1/1",
         fabric_interfaces=(
+            NXOSFEXFabricPort(interface="port-channel101", up=True, state="Active"),
             NXOSFEXFabricPort(interface="Ethernet1/1", up=True, state="Active"),
             NXOSFEXFabricPort(interface="Ethernet1/2", up=False, state="Configured"),
         ),
@@ -80,6 +84,12 @@ def test_two_fexes_and_one_not_online() -> None:
         (101, True, "Online", 3),
         (102, False, "Offline", 0),
     ]
+
+
+def test_fabric_port_channel_needs_exactly_one() -> None:
+    ports = {"ROW_fbr_state": {"fbr_index": "Eth1/1", "fbr_oper_state": "Up"}}
+    (f,) = parse_show_fex_detail(detail(fex(101, TABLE_fbr_state=ports)))
+    assert (f.fabric_port_channel, f.control_fabric_port) == (None, "Ethernet1/1")
 
 
 def test_no_fexes() -> None:

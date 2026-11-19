@@ -993,6 +993,7 @@ def parse_show_fex_detail(output: str, *, wrap_width: int | None = None) -> list
         ]
         if not all(hosts):
             raise ParseError(f"{SHOW_FEX_DETAIL!r}: FEX {fex_id} has a host port without a name")
+        channel = [p.interface for p in fabric if p.interface.startswith("port-channel")]
         max_links = text(row, "max_link")
         try:
             fexes.append(
@@ -1003,7 +1004,8 @@ def parse_show_fex_detail(output: str, *, wrap_width: int | None = None) -> list
                     part_id=text(row, "part_no"),
                     serial_number=text(row, "serial"),
                     software_version=text(row, "fex_ver"),
-                    fabric_port_channel=_local_name(text(row, "fbr_port_control")),
+                    fabric_port_channel=channel[0] if len(channel) == 1 else None,
+                    control_fabric_port=_local_name(text(row, "fbr_port_control")),
                     fabric_interfaces=tuple(fabric),
                     host_interfaces=tuple(h for h in hosts if h),
                     pinning_mode=text(row, "pin_mode"),

@@ -224,8 +224,12 @@ class NXOSFEX(NetSDKModel):
     serial_number: str | None = None
     #: As printed.
     software_version: str | None = None
-    #: Full name, e.g. "port-channel101"; None when the FEX uses no port-channel.
+    #: The port-channel among the fabric ports, e.g. "port-channel101"; None
+    #: when there isn't exactly one.
     fabric_port_channel: str | None = None
+    #: The fabric port carrying control traffic (`fbr_port_control`).
+    control_fabric_port: str | None = None
+    #: Every fabric entry NX-OS lists: the port-channel and its member ports.
     fabric_interfaces: tuple[NXOSFEXFabricPort, ...] = ()
     #: The FEX's own ports, full names ("Ethernet101/1/1", ...).
     host_interfaces: tuple[str, ...] = ()
