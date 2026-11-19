@@ -34,6 +34,8 @@ from pydantic import SecretStr
 from netsdk.cisco.nxos import CiscoNXOS
 from netsdk.cisco.nxos.commands import (
     SHOW_CDP_NEIGHBORS_DETAIL,
+    SHOW_FEX,
+    SHOW_FEX_DETAIL,
     SHOW_INTERFACE,
     SHOW_INTERFACE_SWITCHPORT,
     SHOW_INTERFACE_TRUNK,
@@ -349,7 +351,7 @@ def test_get_ip_addresses(shared: CiscoNXOS) -> None:
 #: Fields whose values are printed: modes and states, never names or numbers.
 _ENUM_KEY = re.compile(
     r"mode|state|status|switchport|encap|negotiat|monitor|proto|version|pruning|trap|v2|capab|duplex"
-    r"|type|flag|layer|role|consist|keepalive|peer.*(stat|link)|reason",
+    r"|type|flag|layer|role|consist|keepalive|peer.*(stat|link)|reason|fex_?(state|mode)|pinning",
     re.I,
 )
 _NOT_ENUM_KEY = re.compile(r"name|desc|platform|addr|id$|ver(sion)?_?str", re.I)
@@ -411,6 +413,8 @@ def _walk(
         SHOW_LLDP_NEIGHBORS_DETAIL,
         SHOW_PORT_CHANNEL_SUMMARY,
         SHOW_VPC,
+        SHOW_FEX,
+        SHOW_FEX_DETAIL,
     ],
 )
 def test_layout_probe(shared: CiscoNXOS, command: str) -> None:
