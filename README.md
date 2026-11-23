@@ -24,11 +24,8 @@ NetBox integration is not yet.
 
 ## Install
 
-Each package has its own tags: `core-v0.1.0`, `cisco-ios-v0.1.0`,
-`cisco-nxos-v0.1.0` (`git tag -l`). Every netsdk package you use must come
-**from the same commit** (D49): pick the tag of the package you need newest
-and install all of them from that tag. At that commit the other packages are
-at whatever version they have there.
+Pick a release tag (`git tag -l 'v*'`) and install every netsdk package you
+use **from that same tag** (D49).
 
 ### uv (recommended)
 
@@ -39,14 +36,13 @@ In your project's `pyproject.toml`:
 dependencies = ["netsdk-cisco-ios", "netsdk-cisco-nxos"]
 
 [tool.uv.sources]
-netsdk-cisco-ios = { git = "https://github.com/MahakSangwan/NetworkSDK", tag = "cisco-nxos-v0.1.0", subdirectory = "packages/cisco-ios" }
-netsdk-cisco-nxos = { git = "https://github.com/MahakSangwan/NetworkSDK", tag = "cisco-nxos-v0.1.0", subdirectory = "packages/cisco-nxos" }
+netsdk-cisco-ios = { git = "https://github.com/MahakSangwan/NetworkSDK", tag = "v0.1.0", subdirectory = "packages/cisco-ios" }
+netsdk-cisco-nxos = { git = "https://github.com/MahakSangwan/NetworkSDK", tag = "v0.1.0", subdirectory = "packages/cisco-nxos" }
 ```
 
-Both use the same tag on purpose: today all three tags point at the same
-commit, but later they won't. Then run `uv sync`; uv takes `netsdk-core`
-from that tag on its own. Using different tags for two packages fails with
-"conflicting URLs for package `netsdk-core`".
+then `uv sync`. uv takes `netsdk-core` from the same tag on its own. Using
+different tags for two packages fails with "conflicting URLs for package
+`netsdk-core`".
 
 ### pip
 
@@ -56,7 +52,7 @@ public PyPI, where anyone could publish a package under that name.
 ```
 python3 -m venv .venv
 . .venv/bin/activate
-TAG=cisco-nxos-v0.1.0
+TAG=v0.1.0
 REPO=git+https://github.com/MahakSangwan/NetworkSDK@$TAG
 pip install \
   "netsdk-core[ssh,genie] @ $REPO#subdirectory=packages/core" \
