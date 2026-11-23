@@ -3,6 +3,9 @@
 netsdk SDK for Cisco Nexus switches running standalone NX-OS. ACI-mode
 switches are not supported (D38).
 
+Install from a release tag together with `netsdk-core`: see the
+[root README](../../README.md#install).
+
 ```python
 from netsdk.core import Credentials
 from netsdk.cisco.nxos import CiscoNXOS

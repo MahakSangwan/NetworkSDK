@@ -2,6 +2,9 @@
 
 netsdk SDK for Cisco IOS (classic). IOS-XE lives in its own package.
 
+Install from a release tag together with `netsdk-core`: see the
+[root README](../../README.md#install).
+
 ```python
 from netsdk.core import Credentials
 from netsdk.cisco.ios import CiscoIOS
