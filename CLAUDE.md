@@ -64,11 +64,13 @@ uv run pytest -m live -s packages/cisco-nxos/tests/live
 
 ## Releases (D49)
 
-Consumers install from git at a tag, every package from one commit. While
-0.x all packages share one version:
+Consumers install from git at a tag; every package they use comes from one
+commit. Versions are independent (D7), each package has its own tags:
 
-1. Set the same `version` in every `packages/*/pyproject.toml`; bump the
-   `netsdk-core>=0.N,<0.N+1` pins when the minor changes (D7). `uv lock`.
+1. Bump `version` in the `packages/*/pyproject.toml` of each package that
+   changed; when core's minor changes, bump the `netsdk-core>=0.N,<0.N+1`
+   pins too (D7). `uv lock`.
 2. Checks and unit tests pass; Mahak has live-tested what changed.
-3. Record the release in the D49 entry, commit, then `git tag -a vX.Y.Z`
-   and push the commit and the tag. Never move or delete a pushed tag.
+3. Record the release in the D49 entry and commit. Tag each bumped package
+   `git tag -a <package>-vX.Y.Z` (`core`, `cisco-ios`, `cisco-nxos`), push
+   the commit and the tags. Never move or delete a pushed tag.
